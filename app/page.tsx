@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import { motion, Variants, useReducedMotion } from "framer-motion";
+import { siteConfig } from "@/config/site"; // DITAMBAHKAN
 
 // ============================================================================
 // DATA TIM MEDIS KLINIK PRATAMA CIPATIK
@@ -241,7 +242,7 @@ export default function Home() {
                 <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${mounted ? theme.bg : 'bg-slate-500'}`}></span>
               </span>
               
-              <span className="font-semibold tracking-wide">Klinik Pratama Cipatik</span>
+              <span className="font-semibold tracking-wide">{siteConfig.name}</span>
               <span className="text-white/20 hidden sm:inline px-1">|</span>
               
               <span className={`${mounted ? theme.text : 'text-slate-400'} hidden sm:flex items-center gap-1.5`}>
@@ -269,7 +270,8 @@ export default function Home() {
               <span>Reservasi Online</span>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
             </Link>
-            <a href="https://wa.me/628999801472" target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto flex items-center justify-center gap-2 bg-transparent border border-white/30 text-white px-8 py-3.5 rounded-xl font-semibold text-sm active:scale-95 transition-all duration-300 transform hover:-translate-y-1 hover:bg-white/10 hover:border-white/50 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/90 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">
+            {/* Menggunakan Data Terpusat (SSOT) */}
+            <a href={`https://wa.me/${siteConfig.contact.wa}`} target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto flex items-center justify-center gap-2 bg-transparent border border-white/30 text-white px-8 py-3.5 rounded-xl font-semibold text-sm active:scale-95 transition-all duration-300 transform hover:-translate-y-1 hover:bg-white/10 hover:border-white/50 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/90 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">
               <svg className="w-5 h-5 fill-current text-white" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347"/></svg>
               Konsultasi Online
             </a>
@@ -283,7 +285,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 2. TRUST BAND (REVISI: Active/Colored by default di Mobile) */}
+      {/* 2. TRUST BAND */}
       <motion.section 
         className="bg-white pt-8 pb-16 border-b border-slate-100 relative z-20"
         initial="hidden"
@@ -296,7 +298,6 @@ export default function Home() {
           
           <div className="flex flex-col md:flex-row items-center justify-center gap-10 md:gap-16">
             
-            {/* Pasien Umum */}
             <motion.div variants={fadeInUp} className="flex items-center gap-4 group cursor-default">
               <div className="w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-300 bg-teal-50 text-teal-600 md:bg-slate-50 md:text-slate-400 md:group-hover:bg-teal-50 md:group-hover:text-teal-600">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
@@ -309,7 +310,6 @@ export default function Home() {
 
             <motion.div variants={fadeInUp} className="hidden md:block w-px h-12 bg-slate-200"></motion.div>
 
-            {/* BPJS Kesehatan */}
             <motion.div variants={fadeInUp} className="flex items-center gap-4 cursor-default group">
               <div className="h-10 flex items-center justify-center transition-opacity duration-300 opacity-100 grayscale-0 md:opacity-70 md:grayscale md:group-hover:opacity-100 md:group-hover:grayscale-0">
                 {!bpjsLogoError ? (
@@ -333,7 +333,6 @@ export default function Home() {
 
             <motion.div variants={fadeInUp} className="hidden md:block w-px h-12 bg-slate-200"></motion.div>
 
-            {/* Asuransi Swasta */}
             <motion.div variants={fadeInUp} className="flex items-center gap-4 group cursor-default">
               <div className="w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-300 bg-blue-50 text-blue-600 md:bg-slate-50 md:text-slate-400 md:group-hover:bg-blue-50 md:group-hover:text-blue-600">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
@@ -370,6 +369,7 @@ export default function Home() {
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             
+            {/* Card Poli Umum */}
             <motion.div variants={fadeInUp} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-teal-900/5 hover:border-teal-300 transition-all duration-300 transform hover:-translate-y-2 relative overflow-hidden group">
               <svg className="absolute -right-4 -bottom-4 w-28 h-28 text-slate-50 group-hover:text-teal-50/50 transition-colors duration-500 z-0 rotate-12" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
               <div className="relative z-10">
@@ -381,6 +381,7 @@ export default function Home() {
               </div>
             </motion.div>
 
+            {/* Card Poli Gigi */}
             <motion.div variants={fadeInUp} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-teal-900/5 hover:border-teal-300 transition-all duration-300 transform hover:-translate-y-2 relative overflow-hidden group">
               <svg className="absolute -right-4 -bottom-4 w-28 h-28 text-slate-50 group-hover:text-teal-50/50 transition-colors duration-500 z-0 -rotate-12" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2c-3.11 0-6 2.45-6 5.5 0 2.2 1.48 4.15 3.5 5.05v6.95C9.5 21.43 11 22 12 22s2.5-.57 2.5-2.5v-6.95c2.02-.9 3.5-2.85 3.5-5.05C18 4.45 15.11 2 12 2zm0 8.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
               <div className="relative z-10">
@@ -392,6 +393,7 @@ export default function Home() {
               </div>
             </motion.div>
 
+            {/* Card Poli KIA */}
             <motion.div variants={fadeInUp} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-teal-900/5 hover:border-teal-300 transition-all duration-300 transform hover:-translate-y-2 relative overflow-hidden group">
               <svg className="absolute -right-4 -bottom-4 w-28 h-28 text-slate-50 group-hover:text-teal-50/50 transition-colors duration-500 z-0 rotate-12" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM9.5 16.5v-3H8v-2h1.5v-3h2v3H13v2h-1.5v3h-2z"/></svg>
               <div className="relative z-10">
@@ -403,6 +405,7 @@ export default function Home() {
               </div>
             </motion.div>
 
+            {/* Card Farmasi */}
             <motion.div variants={fadeInUp} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-teal-900/5 hover:border-teal-300 transition-all duration-300 transform hover:-translate-y-2 relative overflow-hidden group">
               <svg className="absolute -right-4 -bottom-4 w-28 h-28 text-slate-50 group-hover:text-teal-50/50 transition-colors duration-500 z-0 -rotate-12" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.04-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z"/></svg>
               <div className="relative z-10">
@@ -439,6 +442,7 @@ export default function Home() {
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8 mb-12">
             
+            {/* Jadwal Umum */}
             <motion.div variants={fadeInUp} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-[0_4px_24px_-8px_rgba(20,184,166,0.1)] relative overflow-hidden hover:border-teal-200 transition-colors">
               <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-teal-500 to-teal-400"></div>
               <div className="flex items-center gap-4 mb-6 border-b border-slate-100 pb-5 pt-2">
@@ -463,12 +467,13 @@ export default function Home() {
                   </div>
                 </li>
                 <li className="flex justify-between items-center text-sm pt-2 border-t border-slate-100">
-                  <span className="font-medium text-slate-500">Minggu / Libur Nasional</span>
+                  <span className="font-medium text-slate-500">Minggu / Hari Libur Nasional</span>
                   <span className="text-slate-500 bg-slate-100 px-3 py-1.5 rounded-md font-semibold text-xs border border-slate-200">Tutup</span>
                 </li>
               </ul>
             </motion.div>
             
+            {/* Jadwal Gigi */}
             <motion.div variants={fadeInUp} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-[0_4px_24px_-8px_rgba(20,184,166,0.1)] relative overflow-hidden hover:border-teal-200 transition-colors">
               <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-teal-500 to-teal-400"></div>
               <div className="flex items-center gap-4 mb-6 border-b border-slate-100 pb-5 pt-2">
@@ -499,6 +504,7 @@ export default function Home() {
               </ul>
             </motion.div>
             
+            {/* Jadwal KIA */}
             <motion.div variants={fadeInUp} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-[0_4px_24px_-8px_rgba(20,184,166,0.1)] relative overflow-hidden hover:border-teal-200 transition-colors">
               <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-teal-500 to-teal-400"></div>
               <div className="flex items-center gap-4 mb-6 border-b border-slate-100 pb-5 pt-2">
@@ -639,7 +645,7 @@ export default function Home() {
       </section>
 
       {/* 6. TIM MEDIS */}
-      <section className="py-20 md:py-28 bg-white border-t border-slate-100 overflow-hidden relative">
+      <section id="tim-medis" className="py-20 md:py-28 bg-white border-t border-slate-100 overflow-hidden relative scroll-mt-20">
         <motion.div 
           className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"
           initial="hidden"
