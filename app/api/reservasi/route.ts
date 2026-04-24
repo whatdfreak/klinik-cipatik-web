@@ -1,49 +1,265 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import * as z from 'zod';
+import { createHash } from 'crypto';
 
-// INI ADALAH KLIEN KHUSUS SERVER (Menggunakan Kunci Master untuk bypass RLS)
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! 
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: { autoRefreshToken: false, persistSession: false }
+});
+
+type RateLimitEntry = { count: number; resetAt: number };
+type IdempotencyEntry = { payloadHash: string; response: unknown; status: number; expiresAt: number };
+
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const RATE_LIMIT_MAX_REQUEST = 10;
+const MAX_BOOKING_PER_PHONE_PER_DAY = 3;
+const MAX_BOOKING_WINDOW_DAYS = 30;
+const MAX_BOOKING_PER_SESSION = 120;
+const IDEMPOTENCY_TTL_MS = 2 * 60 * 1000;
+// Sesuaikan dengan SOP klinik:
+// - true: NIK boleh daftar >1x per hari jika beda sesi
+// - false: NIK hanya boleh 1x per hari
+const ALLOW_MULTI_BOOKING_SAME_NIK_PER_DAY = true;
+
+const getRateLimitStore = (): Map<string, RateLimitEntry> => {
+  const g = globalThis as typeof globalThis & {
+    __cipatikReservasiRateLimit?: Map<string, RateLimitEntry>;
+  };
+  if (!g.__cipatikReservasiRateLimit) {
+    g.__cipatikReservasiRateLimit = new Map<string, RateLimitEntry>();
+  }
+  return g.__cipatikReservasiRateLimit;
+};
+
+const getIdempotencyStore = (): Map<string, IdempotencyEntry> => {
+  const g = globalThis as typeof globalThis & {
+    __cipatikReservasiIdempotency?: Map<string, IdempotencyEntry>;
+  };
+  if (!g.__cipatikReservasiIdempotency) {
+    g.__cipatikReservasiIdempotency = new Map<string, IdempotencyEntry>();
+  }
+  return g.__cipatikReservasiIdempotency;
+};
+
+const jakartaTodayDateOnly = () => {
+  const now = new Date();
+  const localJakarta = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }));
+  localJakarta.setHours(0, 0, 0, 0);
+  return localJakarta;
+};
+
+const normalizeName = (name: string) => name.replace(/\s+/g, ' ').trim();
+const jsonHeaders = {
+  'Cache-Control': 'no-store, max-age=0',
+  Pragma: 'no-cache',
+};
+
+// 1. ZOD SCHEMA (SERVER-SIDE - STRICT)
+const serverSchema = z.object({
+  nik: z.string().length(16).regex(/^\d+$/),
+  nama_pasien: z.string().min(3).max(120).transform(normalizeName),
+  no_hp: z.string().regex(/^08\d{8,13}$/),
+  poli_tujuan: z.enum(['Poli Umum', 'Poli Gigi', 'Poli KIA']),
+  sesi_kunjungan: z.enum(['Pagi', 'Sore']),
+  tanggal_kunjungan: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+const generateBookingCode = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'CPTK-';
+  for (let i = 0; i < 5; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+  return result;
+};
+
+const generateUniqueBookingCode = async (): Promise<string> => {
+  const maxAttempts = 5;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const candidate = generateBookingCode();
+    const { data, error } = await supabaseAdmin
+      .from('appointments')
+      .select('id')
+      .eq('kode_booking', candidate)
+      .limit(1);
+
+    if (error) throw error;
+    if (!data || data.length === 0) return candidate;
+  }
+  throw new Error('Gagal menghasilkan kode booking unik.');
+};
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { nik, name, date_of_birth, phone_number, service_id, complaint } = body;
+    const contentType = request.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      return NextResponse.json({ error: 'Content-Type harus application/json.' }, { status: 415, headers: jsonHeaders });
+    }
 
-    // 1. Simpan Data Pasien menggunakan Supabase Admin
-    const { data: patientData, error: patientError } = await supabaseAdmin
-      .from('patients')
-      .upsert(
-        { nik, name, date_of_birth, phone_number, is_bpjs: false },
-        { onConflict: 'nik' }
-      )
-      .select()
-      .single();
+    const forwardedFor = request.headers.get('x-forwarded-for');
+    const ip = forwardedFor?.split(',')[0]?.trim() || 'unknown';
+    const rateLimitStore = getRateLimitStore();
+    const nowMs = Date.now();
+    const currentRate = rateLimitStore.get(ip);
 
-    if (patientError) throw new Error(`Gagal menyimpan data pasien: ${patientError.message}`);
+    if (!currentRate || nowMs > currentRate.resetAt) {
+      rateLimitStore.set(ip, { count: 1, resetAt: nowMs + RATE_LIMIT_WINDOW_MS });
+    } else if (currentRate.count >= RATE_LIMIT_MAX_REQUEST) {
+      return NextResponse.json(
+        { error: 'Terlalu banyak percobaan. Silakan tunggu beberapa menit lalu coba kembali.' },
+        { status: 429, headers: jsonHeaders }
+      );
+    } else {
+      currentRate.count += 1;
+      rateLimitStore.set(ip, currentRate);
+    }
 
-    // 2. Buat Antrean Baru menggunakan Supabase Admin
-    const { error: appointmentError } = await supabaseAdmin
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Payload JSON tidak valid.' }, { status: 400, headers: jsonHeaders });
+    }
+
+    // Honeypot anti-bot sederhana: field ini tidak pernah ada di UI normal
+    if (typeof body === 'object' && body !== null && 'website' in body && (body as Record<string, unknown>).website) {
+      return NextResponse.json({ error: 'Permintaan ditolak oleh sistem keamanan.' }, { status: 400, headers: jsonHeaders });
+    }
+
+    // 2. VALIDASI ZOD SERVER
+    const parseResult = serverSchema.safeParse(body);
+    if (!parseResult.success) {
+      return NextResponse.json({ error: 'Data tidak valid atau format salah. Ditolak oleh server.' }, { status: 400, headers: jsonHeaders });
+    }
+
+    const { nik, nama_pasien, no_hp, poli_tujuan, sesi_kunjungan, tanggal_kunjungan } = parseResult.data;
+    const payloadHash = createHash('sha256').update(JSON.stringify(parseResult.data)).digest('hex');
+
+    const idempotencyKeyRaw = request.headers.get('x-idempotency-key');
+    const idempotencyKey = idempotencyKeyRaw?.trim();
+    if (idempotencyKey) {
+      const idempotencyStore = getIdempotencyStore();
+      const currentTime = Date.now();
+      const existing = idempotencyStore.get(idempotencyKey);
+      if (existing && existing.expiresAt > currentTime && existing.payloadHash === payloadHash) {
+        return NextResponse.json(existing.response, { status: existing.status, headers: jsonHeaders });
+      }
+      if (existing && existing.expiresAt > currentTime && existing.payloadHash !== payloadHash) {
+        return NextResponse.json(
+          { error: 'Idempotency key sudah digunakan untuk payload berbeda.' },
+          { status: 409, headers: jsonHeaders }
+        );
+      }
+    }
+
+    // 3. VALIDASI TANGGAL (Tidak boleh masa lalu, Minggu, dan terlalu jauh)
+    const targetDate = new Date(tanggal_kunjungan);
+    const today = jakartaTodayDateOnly();
+    targetDate.setHours(0, 0, 0, 0);
+    const maxDate = new Date(today);
+    maxDate.setDate(today.getDate() + MAX_BOOKING_WINDOW_DAYS);
+
+    if (targetDate < today) {
+      return NextResponse.json({ error: 'Tanggal kunjungan tidak boleh di masa lalu.' }, { status: 400, headers: jsonHeaders });
+    }
+    if (targetDate > maxDate) {
+      return NextResponse.json({ error: 'Reservasi maksimal hanya untuk 30 hari ke depan.' }, { status: 400, headers: jsonHeaders });
+    }
+    if (targetDate.getDay() === 0) {
+      return NextResponse.json({ error: 'Klinik tutup di hari Minggu. Silakan pilih hari lain.' }, { status: 400, headers: jsonHeaders });
+    }
+
+    const poliGabungan = `${poli_tujuan} - ${sesi_kunjungan}`;
+
+    // 4. RATE LIMIT & DOUBLE BOOKING GUARD
+    const { data: existingRecords, error: checkError } = await supabaseAdmin
       .from('appointments')
-      .insert([
-        {
-          patient_id: patientData.id,
-          service_id: service_id,
-          appointment_date: new Date().toISOString(),
-          complaint: complaint,
-          is_bpjs_visit: false,
-          status: 'scheduled'
+      .select('id, nik, no_hp, poli_tujuan')
+      .eq('tanggal_kunjungan', tanggal_kunjungan)
+      .or(`nik.eq.${nik},no_hp.eq.${no_hp}`);
+
+    if (checkError) throw checkError;
+
+    if (existingRecords) {
+      // Guard A: NIK rules berdasarkan SOP
+      const sameNik = existingRecords.filter(r => r.nik === nik);
+      if (!ALLOW_MULTI_BOOKING_SAME_NIK_PER_DAY && sameNik.length > 0) {
+        return NextResponse.json({ error: 'NIK ini sudah terdaftar untuk tanggal tersebut.' }, { status: 409, headers: jsonHeaders });
+      }
+      if (ALLOW_MULTI_BOOKING_SAME_NIK_PER_DAY) {
+        // Tetap cegah duplikat sesi/poli yang sama
+        const sameNikSameSession = sameNik.some((r) => r.poli_tujuan === poliGabungan);
+        if (sameNikSameSession) {
+          return NextResponse.json(
+            { error: 'NIK ini sudah memiliki pendaftaran di sesi yang sama pada tanggal tersebut.' },
+            { status: 409, headers: jsonHeaders }
+          );
         }
-      ]);
+      }
+      
+      // Guard B: Anti-Spam (1 No HP maks 3 pendaftaran di hari yang sama)
+      const samePhone = existingRecords.filter(r => r.no_hp === no_hp);
+      if (samePhone.length >= MAX_BOOKING_PER_PHONE_PER_DAY) {
+        return NextResponse.json({ error: 'Nomor HP ini telah mencapai batas maksimal 3 pendaftaran per hari.' }, { status: 429, headers: jsonHeaders });
+      }
 
-    if (appointmentError) throw new Error(`Gagal membuat antrean: ${appointmentError.message}`);
+      // Guard C: No HP yang sama tidak boleh ambil sesi/poli yang sama di hari yang sama
+      const samePhoneSameSession = samePhone.some((r) => r.poli_tujuan === poliGabungan);
+      if (samePhoneSameSession) {
+        return NextResponse.json({ error: 'Sesi untuk nomor HP ini sudah terdaftar di tanggal yang sama.' }, { status: 409, headers: jsonHeaders });
+      }
+    }
 
-    return NextResponse.json({ message: 'Pendaftaran antrean berhasil disimpan!' }, { status: 200 });
+    // Guard D: Batas kapasitas per poli+sesi per hari
+    const { count: sessionCount, error: sessionCountError } = await supabaseAdmin
+      .from('appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('tanggal_kunjungan', tanggal_kunjungan)
+      .eq('poli_tujuan', poliGabungan);
+
+    if (sessionCountError) throw sessionCountError;
+    if ((sessionCount ?? 0) >= MAX_BOOKING_PER_SESSION) {
+      return NextResponse.json(
+        { error: 'Kuota sesi untuk poli ini sudah penuh. Silakan pilih sesi atau tanggal lain.' },
+        { status: 409, headers: jsonHeaders }
+      );
+    }
+
+    // 5. INSERT VIA SERVICE ROLE
+    const kode_booking = await generateUniqueBookingCode();
+    const { data, error } = await supabaseAdmin
+      .from('appointments')
+      .insert([{
+        kode_booking,
+        nik,
+        nama_pasien,
+        no_hp,
+        poli_tujuan: poliGabungan,
+        tanggal_kunjungan,
+        status: 'Menunggu'
+      }])
+      .select(); 
+
+    if (error) {
+      console.error("❌ DB Insert Error [INTERNAL]:", error);
+      return NextResponse.json({ error: 'Gagal menyimpan data ke sistem antrean klinik.' }, { status: 500, headers: jsonHeaders });
+    }
+
+    const successPayload = { success: true, kode_booking, data: data[0] };
+    if (idempotencyKey) {
+      const idempotencyStore = getIdempotencyStore();
+      idempotencyStore.set(idempotencyKey, {
+        payloadHash,
+        response: successPayload,
+        status: 201,
+        expiresAt: Date.now() + IDEMPOTENCY_TTL_MS,
+      });
+    }
+    return NextResponse.json(successPayload, { status: 201, headers: jsonHeaders });
 
   } catch (error: any) {
-    console.error("API Error:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("❌ Catch API Error [INTERNAL]:", error);
+    return NextResponse.json({ error: 'Terjadi kesalahan internal server saat memproses reservasi.' }, { status: 500, headers: jsonHeaders });
   }
 }

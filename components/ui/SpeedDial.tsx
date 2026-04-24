@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion, AnimatePresence, useReducedMotion, useScroll } from "framer-motion";
+// 1. Tambahkan useMotionValueEvent di import
+import { motion, AnimatePresence, useReducedMotion, useScroll, useMotionValueEvent } from "framer-motion";
 import { siteConfig } from "@/config/site";
 
 export default function SpeedDial() {
@@ -17,12 +18,11 @@ export default function SpeedDial() {
   const shouldReduceMotion = useReducedMotion(); 
   const { scrollY } = useScroll();
 
-  useEffect(() => {
-    return scrollY.onChange((latest) => {
-      setIsVisible(latest > 300);
-      if (latest <= 300) setIsOpen(false); 
-    });
-  }, [scrollY]);
+  // 2. Ganti useEffect(scrollY.onChange) menjadi useMotionValueEvent
+  useMotionValueEvent(scrollY, "change", (latest) => {
+    setIsVisible(latest > 300);
+    if (latest <= 300) setIsOpen(false); 
+  });
 
   useEffect(() => {
     const handleOutsideInteraction = (event: Event) => {
@@ -30,23 +30,21 @@ export default function SpeedDial() {
         setIsOpen(false);
       }
     };
-
     const handleEscapeKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-      }
+      if (event.key === "Escape") setIsOpen(false);
     };
 
     if (isOpen) {
       document.addEventListener("pointerdown", handleOutsideInteraction);
       document.addEventListener("keydown", handleEscapeKey);
     }
-
     return () => {
       document.removeEventListener("pointerdown", handleOutsideInteraction);
       document.removeEventListener("keydown", handleEscapeKey);
     };
   }, [isOpen]);
+
+  // ... (Sisa kode return render JSX di bawahnya TETAP SAMA) ...
 
   const toggleMenu = () => setIsOpen(!isOpen);
 
