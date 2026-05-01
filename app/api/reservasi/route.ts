@@ -60,11 +60,46 @@ const jsonHeaders = {
 // 1. ZOD SCHEMA (SERVER-SIDE - STRICT)
 const serverSchema = z.object({
   nik: z.string().length(16).regex(/^\d+$/),
-  nama_pasien: z.string().min(3).max(120).transform(normalizeName),
-  no_hp: z.string().regex(/^08\d{8,13}$/),
+
+  nama_pasien: z
+    .string()
+    .min(3)
+    .max(120)
+    .regex(
+      /^[a-zA-Z\s.,'-]+$/,
+      'Nama hanya boleh berisi huruf, spasi, dan tanda baca dasar.'
+    )
+    .transform(normalizeName),
+
+  no_hp: z
+    .string()
+    .regex(
+      /^08[0-9]{7,11}$/,
+      "Nomor HP harus diawali '08' dan terdiri dari 9-13 angka."
+    ),
+
   poli_tujuan: z.enum(['Poli Umum', 'Poli Gigi', 'Poli KIA']),
   sesi_kunjungan: z.enum(['Pagi', 'Sore']),
-  tanggal_kunjungan: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+
+  tanggal_kunjungan: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal tidak valid.')
+    .refine((val) => {
+      const selected = new Date(val + 'T00:00:00+07:00');
+      const today = jakartaTodayDateOnly();
+      return selected >= today;
+    }, { message: 'Tanggal kunjungan tidak boleh di masa lalu.' })
+    .refine((val) => {
+      const selected = new Date(val + 'T00:00:00+07:00');
+      const today = jakartaTodayDateOnly();
+      const maxDate = new Date(today);
+      maxDate.setDate(today.getDate() + MAX_BOOKING_WINDOW_DAYS);
+      return selected <= maxDate;
+    }, { message: `Reservasi maksimal hanya untuk ${MAX_BOOKING_WINDOW_DAYS} hari ke depan.` })
+    .refine((val) => {
+      const selected = new Date(val + 'T00:00:00+07:00');
+      return selected.getDay() !== 0;
+    }, { message: 'Klinik tutup di hari Minggu. Silakan pilih hari lain.' }),
 });
 
 const generateBookingCode = () => {
@@ -153,8 +188,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // 3. VALIDASI TANGGAL (Tidak boleh masa lalu, Minggu, dan terlalu jauh)
-    const targetDate = new Date(tanggal_kunjungan);
+    // 3. VALIDASI TANGGAL LANJUTAN (fallback guard — sudah dicek Zod, ini lapisan keamanan ganda)
+    const targetDate = new Date(tanggal_kunjungan + 'T00:00:00+07:00');
     const today = jakartaTodayDateOnly();
     targetDate.setHours(0, 0, 0, 0);
     const maxDate = new Date(today);
@@ -164,7 +199,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Tanggal kunjungan tidak boleh di masa lalu.' }, { status: 400, headers: jsonHeaders });
     }
     if (targetDate > maxDate) {
-      return NextResponse.json({ error: 'Reservasi maksimal hanya untuk 30 hari ke depan.' }, { status: 400, headers: jsonHeaders });
+      return NextResponse.json({ error: `Reservasi maksimal hanya untuk ${MAX_BOOKING_WINDOW_DAYS} hari ke depan.` }, { status: 400, headers: jsonHeaders });
     }
     if (targetDate.getDay() === 0) {
       return NextResponse.json({ error: 'Klinik tutup di hari Minggu. Silakan pilih hari lain.' }, { status: 400, headers: jsonHeaders });
@@ -177,7 +212,8 @@ export async function POST(request: Request) {
       .from('appointments')
       .select('id, nik, no_hp, poli_tujuan')
       .eq('tanggal_kunjungan', tanggal_kunjungan)
-      .or(`nik.eq.${nik},no_hp.eq.${no_hp}`);
+      .or(`nik.eq.${nik},no_hp.eq.${no_hp}`)
+      .neq('status', 'Batal'); // Tiket yang dibatalkan tidak dihitung
 
     if (checkError) throw checkError;
 
@@ -216,7 +252,8 @@ export async function POST(request: Request) {
       .from('appointments')
       .select('id', { count: 'exact', head: true })
       .eq('tanggal_kunjungan', tanggal_kunjungan)
-      .eq('poli_tujuan', poliGabungan);
+      .eq('poli_tujuan', poliGabungan)
+      .neq('status', 'Batal'); // Tiket batal tidak makan kuota
 
     if (sessionCountError) throw sessionCountError;
     if ((sessionCount ?? 0) >= MAX_BOOKING_PER_SESSION) {

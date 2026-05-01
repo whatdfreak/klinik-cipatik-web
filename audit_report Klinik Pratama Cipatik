@@ -1,0 +1,422 @@
+# Laporan Audit Menyeluruh — Klinik Pratama Cipatik Web
+**Tanggal:** 25 April 2026  
+**Auditor:** Senior DevSecOps / QA / UX Researcher  
+**Scope:** `app/`, `components/`, `config/`, `lib/`, file konfigurasi
+
+---
+
+## Skor Keseluruhan
+
+| Area | Skor |
+|---|---|
+| 🔐 Security & OWASP | ⭐⭐⭐⭐ Baik (ada 1 medium, 1 minor) |
+| ⚙️ Next.js & React Best Practices | ⭐⭐⭐ Perlu Perbaikan (3 medium) |
+| ♿ UX & Accessibility | ⭐⭐⭐⭐ Baik (ada 2 minor) |
+| 🛡️ Error Handling & Edge Cases | ⭐⭐⭐ Perlu Perbaikan (1 kritis, 1 medium) |
+
+**Verdict Keseluruhan: ✅ BAIK — Siap development, perlu 2-3 perbaikan sebelum production.**
+
+---
+
+## Ringkasan Eksekutif
+
+Codebase ini menunjukkan **tingkat keamanan yang di atas rata-rata** untuk project klinik skala kecil-menengah. API `/api/reservasi` sudah memiliki rate limiting, Zod validation di dua layer, idempotency key, dan honeypot anti-bot — ini adalah praktik yang sangat baik dan tidak umum ditemukan di project sejenis.
+
+Tidak ditemukan celah **XSS, SQL Injection, atau CSRF** yang aktif. Namun ada beberapa area yang perlu diperkuat sebelum rilis ke publik.
+
+---
+
+## 🔴 Temuan Kritis (Wajib Diperbaiki Sebelum Go-Live)
+
+### [CRIT-01] Rate Limiter Berbasis In-Memory — Tidak Tahan Server Restart & Serverless
+
+**File:** `app/api/reservasi/route.ts` (baris 27–45)  
+**Severity:** HIGH  
+**Kategori:** Availability / Security
+
+**Masalah:**
+```typescript
+// Disimpan di globalThis — hilang saat server restart atau cold start
+const getRateLimitStore = (): Map<string, RateLimitEntry> => {
+  const g = globalThis as typeof globalThis & {
+    __cipatikReservasiRateLimit?: Map<string, RateLimitEntry>;
+  };
+  ...
+}
+```
+
+Rate limiter dan idempotency store disimpan di **memori proses Node.js**. Di lingkungan Vercel/serverless, setiap request bisa ditangani oleh instance terpisah. Ini berarti:
+- Penyerang bisa melewati rate limit hanya dengan mengganti IP atau menunggu instance baru.
+- Idempotency key tidak efektif antar instance.
+- Saat server restart (deploy ulang), semua counter reset.
+
+**Rekomendasi:** Gunakan Redis (Upstash) sebagai persistent store.
+
+```bash
+npm install @upstash/ratelimit @upstash/redis
+```
+
+```typescript
+// lib/ratelimit.ts
+import { Ratelimit } from "@upstash/ratelimit";
+import { Redis } from "@upstash/redis";
+
+export const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(10, "10 m"),
+  analytics: true,
+});
+
+// Di app/api/reservasi/route.ts:
+const { success, reset } = await ratelimit.limit(ip);
+if (!success) {
+  return NextResponse.json(
+    { error: 'Terlalu banyak percobaan. Coba lagi nanti.' },
+    { status: 429, headers: { 'Retry-After': String(Math.ceil((reset - Date.now()) / 1000)) } }
+  );
+}
+```
+
+Tambahkan ke `.env.local`:
+```
+UPSTASH_REDIS_REST_URL=...
+UPSTASH_REDIS_REST_TOKEN=...
+```
+
+---
+
+### [CRIT-02] Missing Content-Security-Policy (CSP) Header
+
+**File:** `next.config.ts`  
+**Severity:** HIGH  
+**Kategori:** OWASP A05 - Security Misconfiguration
+
+**Masalah:** File `next.config.ts` sudah bagus — ada `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`. **Namun tidak ada `Content-Security-Policy`**. Tanpa CSP, jika ada celah XSS yang ditemukan di masa depan (misal dari library third-party), browser tidak punya lapisan pertahanan untuk mencegah eksekusi script berbahaya.
+
+Klinik menangani data sensitif (NIK, No HP) — CSP adalah wajib.
+
+**Rekomendasi:** Tambahkan CSP ke `next.config.ts`:
+
+```typescript
+// next.config.ts
+const securityHeaders = [
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  {
+    key: "Content-Security-Policy",
+    value: [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",  // 'unsafe-inline' diperlukan Framer Motion
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
+      "img-src 'self' data: https://images.unsplash.com https://*.supabase.co",
+      "connect-src 'self' https://*.supabase.co",
+      "frame-src https://www.google.com",  // untuk Google Maps embed
+    ].join("; "),
+  },
+  {
+    key: "Strict-Transport-Security",
+    value: "max-age=63072000; includeSubDomains; preload",
+  },
+];
+```
+
+---
+
+## 🟡 Temuan Medium (Perlu Diperbaiki Sebelum atau Sesaat Setelah Go-Live)
+
+### [MED-01] Supabase Client Diinisialisasi di `lib/supabase.ts` Bisa Crash di Build Time
+
+**File:** `lib/supabase.ts`  
+**Severity:** MEDIUM  
+**Kategori:** Runtime Error
+
+**Masalah:**
+```typescript
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing Supabase environment variables');
+}
+```
+
+`throw` di module-level menyebabkan **build Next.js gagal total** jika variabel env tidak ada (misal saat CI/CD pipeline belum dikonfigurasi). Lebih baik gunakan lazy initialization.
+
+**Rekomendasi:**
+```typescript
+// lib/supabase.ts
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+let _supabase: SupabaseClient | null = null;
+
+export const getSupabase = () => {
+  if (_supabase) return _supabase;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error('[Supabase] Missing env vars. Check .env.local');
+  _supabase = createClient(url, key);
+  return _supabase;
+};
+
+// Backward compat (opsional):
+export const supabase = typeof window !== 'undefined' ? getSupabase() : null as any;
+```
+
+---
+
+### [MED-02] `"use client"` di `app/page.tsx` — Seluruh Homepage Dirender di Client
+
+**File:** `app/page.tsx` (baris 1)  
+**Severity:** MEDIUM  
+**Kategori:** Next.js Best Practices / Performance
+
+**Masalah:** Seluruh halaman Beranda adalah Client Component karena ada `"use client"` di baris pertama. Ini berarti:
+- Data Tim Medis di-fetch dari browser (bukan server), sehingga tidak ada SSR/caching.
+- Halaman awalnya kosong, baru terisi setelah fetch selesai → **CLS (Cumulative Layout Shift) tinggi**.
+- Google tidak bisa mengindeks konten Tim Medis secara optimal (SEO).
+
+**Rekomendasi:** Pisahkan logika interaktif ke komponen client kecil:
+
+```
+app/
+  page.tsx                   ← Server Component (hapus "use client")
+  _components/
+    StatusKlinik.tsx         ← "use client" (untuk jam buka real-time)
+    TimMedisCarousel.tsx     ← "use client" (untuk drag scroll)
+```
+
+```typescript
+// app/page.tsx (Server Component)
+import { supabase } from '@/lib/supabase'; // Server-side fetch
+
+export default async function Home() {
+  // Fetch di server, bukan di browser
+  const { data: timMedis } = await supabase
+    .from('staff')
+    .select('id, nama, jabatan, kategori, deskripsi, foto_url, lisensi')
+    .eq('is_active', true)
+    .order('urutan');
+
+  return (
+    <div>
+      <TimMedisCarousel data={timMedis ?? []} />
+      {/* ... */}
+    </div>
+  );
+}
+```
+
+---
+
+### [MED-03] Data Kontak Tidak Konsisten: `config/site.ts` vs `app/kontak/page.tsx`
+
+**File:** `app/kontak/page.tsx` (baris 48–49, 71)  
+**Severity:** MEDIUM  
+**Kategori:** Data Integrity / UX
+
+**Masalah:** Halaman kontak menggunakan nomor placeholder `(022) XXXXXXXX` dan `6281200000000` yang **berbeda** dari nomor asli di `config/site.ts`. Pasien yang mengunjungi halaman Kontak akan mendapatkan nomor yang salah.
+
+```tsx
+// app/kontak/page.tsx - SALAH (placeholder, bukan nomor asli)
+href="https://wa.me/6281200000000"
+```
+
+**Rekomendasi:** Gunakan `siteConfig` sebagai Single Source of Truth:
+```tsx
+import { siteConfig } from "@/config/site";
+// ...
+<a href={`https://wa.me/${siteConfig.contact.wa.raw}`}>
+  {siteConfig.contact.wa.display}
+</a>
+```
+
+---
+
+### [MED-04] Tidak Ada Error Boundary — Aplikasi Bisa Blank Screen Saat Exception
+
+**File:** `app/layout.tsx`  
+**Severity:** MEDIUM  
+**Kategori:** Error Handling
+
+**Masalah:** Tidak ada `error.tsx` atau React Error Boundary. Jika komponen manapun melempar uncaught exception (misal Supabase client gagal karena env var bermasalah), halaman menjadi **blank screen putih** tanpa pesan apapun ke pengguna.
+
+**Rekomendasi:** Tambahkan `app/error.tsx`:
+
+```tsx
+// app/error.tsx
+'use client';
+
+export default function GlobalError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center text-center px-4">
+      <h2 className="text-2xl font-bold text-slate-900 mb-3">Terjadi Kesalahan</h2>
+      <p className="text-slate-600 mb-6 max-w-sm">
+        Maaf, ada gangguan sementara. Tim kami sedang menangani masalah ini.
+      </p>
+      <button
+        onClick={reset}
+        className="bg-teal-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-teal-500"
+      >
+        Coba Lagi
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+## 🟢 Temuan Minor / Low (Saran Optimasi)
+
+### [LOW-01] `<img>` Native vs `next/image` — Tidak Ada Lazy Loading Otomatis
+
+**File:** `app/page.tsx` (Tim Medis carousel & Hero section)  
+**Severity:** LOW  
+**Kategori:** Performance
+
+Gambar foto tim medis dan hero menggunakan `<img>` HTML biasa. Next.js menyediakan `<Image>` dari `next/image` yang memberikan:
+- Lazy loading otomatis
+- Optimasi format (WebP/AVIF)
+- Placeholder blur selama loading
+- Mencegah CLS
+
+```tsx
+// Sebelum:
+<img src={medis.foto_url} alt={medis.nama} className="..." />
+
+// Sesudah:
+import Image from 'next/image';
+<Image
+  src={medis.foto_url || '/images/placeholder-staff.jpg'}
+  alt={medis.nama}
+  fill
+  className="object-cover"
+  sizes="(max-width: 768px) 280px, 320px"
+/>
+```
+
+Tambahkan domain gambar ke `next.config.ts`:
+```typescript
+images: {
+  remotePatterns: [
+    { protocol: 'https', hostname: 'images.unsplash.com' },
+    { protocol: 'https', hostname: '*.supabase.co' },
+  ],
+},
+```
+
+---
+
+### [LOW-02] `useState<any[]>` untuk Data Tim Medis — TypeScript Tidak Dimanfaatkan
+
+**File:** `app/page.tsx` (baris 13)  
+**Severity:** LOW  
+**Kategori:** Code Quality / TypeScript
+
+```typescript
+// Sebelum — mematikan type safety:
+const [dataTimMedis, setDataTimMedis] = useState<any[]>([]);
+
+// Sesudah — type yang jelas:
+interface StaffMember {
+  id: number;
+  nama: string;
+  jabatan: string;
+  kategori: string;
+  deskripsi: string | null;
+  foto_url: string | null;
+  lisensi: string | null;
+  status_karyawan?: string;
+}
+const [dataTimMedis, setDataTimMedis] = useState<StaffMember[]>([]);
+```
+
+---
+
+### [LOW-03] Halaman `app/tentang/` dan `app/kontak/` Menggunakan Warna Biru (bg-blue-600) — Tidak Konsisten dengan Design System Teal
+
+**File:** `app/tentang/page.tsx`, `app/kontak/page.tsx`  
+**Severity:** LOW  
+**Kategori:** UX / Design Consistency
+
+Seluruh design system halaman utama menggunakan warna **teal** sebagai brand color, namun halaman Tentang dan Kontak menggunakan `bg-blue-600`. Ini menciptakan inkonsistensi visual yang mengganggu brand identity.
+
+**Rekomendasi:** Ganti `blue-600` → `teal-700` atau `slate-900` di kedua halaman tersebut.
+
+---
+
+### [LOW-04] Tidak Ada `og:image` / Open Graph Meta Tags
+
+**File:** `app/layout.tsx`  
+**Severity:** LOW  
+**Kategori:** SEO / Social Sharing
+
+Ketika link website dibagikan di WhatsApp atau media sosial, tidak ada gambar preview yang muncul karena tidak ada OG meta tags.
+
+**Rekomendasi:**
+```typescript
+// app/layout.tsx
+export const metadata: Metadata = {
+  title: "Klinik Pratama Cipatik | Pelayanan Medis Terpadu",
+  description: "...",
+  openGraph: {
+    title: "Klinik Pratama Cipatik",
+    description: "Fasilitas Kesehatan Tingkat Pertama...",
+    url: "https://klinikcipatik.com",
+    siteName: "Klinik Pratama Cipatik",
+    images: [{ url: "/images/og-image.jpg", width: 1200, height: 630 }],
+    locale: "id_ID",
+    type: "website",
+  },
+};
+```
+
+---
+
+## ✅ Hal yang Sudah Sangat Baik (Apresiasi)
+
+| Fitur | Catatan |
+|---|---|
+| **Dual-layer Zod validation** | Validasi di client (react-hook-form) DAN di server (route.ts) — sangat jarang ada di project skala ini |
+| **Idempotency Key** | Mencegah double-submit yang efektif |
+| **Honeypot anti-bot** | Field `website` yang tidak terlihat user biasa — teknik yang tepat |
+| **Rate limiter per IP** | Ada, meski perlu dipindahkan ke Redis |
+| **Booking code uniqueness check** | Loop `generateUniqueBookingCode()` dengan max 5 attempt |
+| **`poweredByHeader: false`** | Menghilangkan fingerprint teknologi dari response header |
+| **`X-Frame-Options: DENY`** | Mencegah clickjacking |
+| **Quota per session** | `MAX_BOOKING_PER_SESSION = 120` mencegah flooding satu poli |
+| **`siteConfig` SSOT** | Kontak terpusat, digunakan di Navbar, Footer, SpeedDial — DRY pattern yang baik |
+| **`useReducedMotion()`** | Respek terhadap preferensi aksesibilitas pengguna — sangat jarang diimplementasikan |
+| **AbortController dengan timeout** | 12 detik timeout dengan abort signal pada fetch reservasi |
+
+---
+
+## Prioritas Action Items (Urutan Eksekusi)
+
+```
+[Sebelum Go-Live - WAJIB]
+  □ [CRIT-02] Tambahkan Content-Security-Policy header di next.config.ts
+  □ [MED-03]  Fix nomor kontak di app/kontak/page.tsx pakai siteConfig
+  □ [MED-04]  Tambahkan app/error.tsx sebagai global error boundary
+
+[Pasca Go-Live - Segera]
+  □ [CRIT-01] Migrasi rate limiter ke Upstash Redis
+  □ [MED-01]  Refactor lib/supabase.ts agar tidak throw di module level
+  □ [MED-02]  Pisahkan Server dan Client Components di app/page.tsx
+
+[Nice to Have]
+  □ [LOW-01]  Ganti <img> dengan next/image untuk performa
+  □ [LOW-02]  Tambahkan TypeScript interface StaffMember
+  □ [LOW-03]  Konsistensi warna brand teal di halaman tentang & kontak
+  □ [LOW-04]  Tambahkan Open Graph meta tags untuk social sharing
+```
+
+---
+
+*Laporan ini dibuat berdasarkan analisis statis codebase. Tidak ada keys atau data sensitif yang dibocorkan dalam laporan ini.*

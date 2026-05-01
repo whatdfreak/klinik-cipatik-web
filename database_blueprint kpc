@@ -1,0 +1,342 @@
+# Blueprint Database — Klinik Pratama Cipatik
+**Status:** Rancangan Awal (Belum Dieksekusi)  
+**Target:** Supabase (PostgreSQL)  
+**Tanggal:** 25 April 2026
+
+---
+
+> [!IMPORTANT]
+> Dokumen ini adalah **blueprint analisis murni** — tidak ada satu baris kode UI/UX yang diubah. Semua animasi Framer Motion, layout Tailwind, dan logika komponen tetap utuh.
+
+---
+
+## Ringkasan Temuan: Data Statis yang Perlu Dipindahkan ke DB
+
+| # | Data Hardcoded | Lokasi File | Urgensi Migrasi |
+|---|---|---|---|
+| 1 | `dataTimMedis` — array 9 objek tenaga medis | `app/page.tsx` baris 11–93 | 🔴 Tinggi |
+| 2 | Layanan Klinik — 4 kartu poli (Umum, Gigi, KIA, Farmasi) | `app/page.tsx` baris 372–418 | 🔴 Tinggi |
+| 3 | Jadwal Operasional — jam buka per poli per hari | `app/page.tsx` baris 443–536 | 🔴 Tinggi |
+| 4 | Alur Pelayanan — 4 langkah pendaftaran | `app/page.tsx` baris 579–640 | 🟡 Menengah |
+| 5 | `POLI_OPTIONS` & `SESI_OPTIONS` — enum poli tujuan | `app/reservasi/page.tsx` baris 14–15 | 🔴 Tinggi |
+| 6 | Visi, Misi & Nilai Inti Klinik | `app/tentang/page.tsx` baris 29–92 | 🟡 Menengah |
+| 7 | Tabel `appointments` — sudah ada, perlu diperkuat | `app/api/reservasi/route.ts` | ✅ Sudah ada |
+| 8 | Tabel `services` — sudah dipanggil tapi belum ada schema formal | `app/api/layanan/route.ts` baris 13 | 🔴 Tinggi |
+| 9 | Info Kontak & Alamat | `config/site.ts` (SSOT sudah bagus) | 🟢 Opsional |
+
+---
+
+## Daftar Tabel Utama
+
+### Diagram Relasi (ERD Ringkas)
+
+```mermaid
+erDiagram
+    services {
+        uuid id PK
+        text slug UK
+        text nama
+        text deskripsi
+        text icon_svg
+        boolean is_active
+        int urutan
+    }
+
+    doctor_schedule {
+        uuid id PK
+        uuid service_id FK
+        int hari_mulai
+        int hari_selesai
+        time jam_buka_pagi
+        time jam_tutup_pagi
+        time jam_buka_sore
+        time jam_tutup_sore
+    }
+
+    staff {
+        uuid id PK
+        uuid service_id FK
+        text nama
+        text jabatan
+        text kategori
+        text deskripsi
+        text foto_url
+        text lisensi
+        boolean is_active
+        int urutan
+    }
+
+    appointments {
+        uuid id PK
+        text kode_booking UK
+        text nik
+        text nama_pasien
+        text no_hp
+        text poli_tujuan
+        text sesi_kunjungan
+        date tanggal_kunjungan
+        text status
+        timestamptz created_at
+    }
+
+    services ||--o{ doctor_schedule : "memiliki jadwal"
+    services ||--o{ staff : "menaungi staf"
+    services ||--o{ appointments : "menjadi tujuan"
+```
+
+---
+
+## Skema Detail Per Tabel
+
+---
+
+### 1. `services` — Master Data Layanan Klinik
+
+> Menggantikan 4 kartu layanan hardcoded di `app/page.tsx` (baris 372–418) dan `POLI_OPTIONS` di form reservasi.
+
+```sql
+CREATE TABLE services (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug          TEXT        NOT NULL UNIQUE,       -- "poli-umum", "poli-gigi"
+  nama          TEXT        NOT NULL,              -- "Poli Umum"
+  nama_singkat  TEXT        NOT NULL,              -- "Poli Umum" (untuk dropdown form)
+  deskripsi     TEXT        NOT NULL,
+  icon_svg      TEXT,                              -- String raw SVG path
+  is_active     BOOLEAN     NOT NULL DEFAULT TRUE,
+  urutan        INTEGER     NOT NULL DEFAULT 0,    -- Urutan tampil di halaman
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**Seed Data Awal:**
+
+| slug | nama | nama_singkat |
+|---|---|---|
+| `poli-umum` | Poli Umum | Poli Umum |
+| `poli-gigi` | Poli Gigi | Poli Gigi |
+| `poli-kia` | Layanan KIA & KB | Poli KIA |
+| `farmasi` | Farmasi & Obat | Farmasi |
+
+---
+
+### 2. `doctor_schedule` — Jadwal Operasional Per Poli
+
+> Menggantikan 3 kartu jadwal hardcoded di `app/page.tsx` (baris 443–536). Juga menjadi **source of truth** untuk logika `checkStatusKlinik()`.
+
+```sql
+CREATE TABLE doctor_schedule (
+  id              UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  service_id      UUID    NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+  hari_mulai      SMALLINT NOT NULL,    -- 1=Senin, 6=Sabtu (ISO weekday)
+  hari_selesai    SMALLINT NOT NULL,    -- 1=Senin, 6=Sabtu
+  jam_buka_pagi   TIME    NOT NULL,     -- '08:00:00'
+  jam_tutup_pagi  TIME    NOT NULL,     -- '12:00:00'
+  jam_buka_sore   TIME,                 -- '14:00:00' (NULL = tidak ada sesi sore)
+  jam_tutup_sore  TIME,                 -- '18:00:00'
+  catatan         TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT valid_hari CHECK (hari_mulai >= 1 AND hari_selesai <= 6 AND hari_mulai <= hari_selesai),
+  CONSTRAINT valid_jam_pagi CHECK (jam_buka_pagi < jam_tutup_pagi)
+);
+```
+
+**Seed Data Awal (berdasarkan jadwal yang ada di halaman):**
+
+| Poli | Hari | Pagi | Sore |
+|---|---|---|---|
+| Poli Umum | Senin–Jumat | 08:00–12:00 | 14:00–18:00 |
+| Poli Umum | Sabtu | 08:00–12:00 | 16:00–18:00 |
+| Poli Gigi | Senin–Jumat | 08:00–12:00 | 14:00–18:00 |
+| Poli Gigi | Sabtu | 08:00–12:00 | 16:00–18:00 |
+| Poli KIA | Senin–Jumat | 08:00–12:00 | 14:00–18:00 |
+| Poli KIA | Sabtu | 08:00–12:00 | 16:00–18:00 |
+
+---
+
+### 3. `staff` — Tim Medis & Tenaga Kesehatan
+
+> Menggantikan `dataTimMedis` yang hardcoded di `app/page.tsx` (baris 11–93).
+
+```sql
+CREATE TABLE staff (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  service_id  UUID        REFERENCES services(id) ON DELETE SET NULL,
+  nama        VARCHAR(150) NOT NULL,
+  jabatan     VARCHAR(100) NOT NULL,   -- "Dokter Umum", "Apoteker"
+  kategori    VARCHAR(80)  NOT NULL,   -- "Dokter Umum", "Farmasi", "Keperawatan"
+  deskripsi   TEXT         NOT NULL,
+  foto_url    TEXT,                    -- URL Supabase Storage atau eksternal
+  lisensi     VARCHAR(100),            -- Nomor SIP (opsional, bisa dikosongkan)
+  is_active   BOOLEAN      NOT NULL DEFAULT TRUE,
+  urutan      INTEGER      NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+```
+
+**Seed Data Awal (9 staf saat ini):**
+
+| nama | jabatan | kategori |
+|---|---|---|
+| dr. Elviana R. Hermanus | Dokter Umum | Dokter Umum |
+| dr. Roery S. Kriswihadi | Dokter Umum | Dokter Umum |
+| drg. Atika Suryadewi | Dokter Gigi | Dokter Gigi |
+| Apt. Syifa Fatasyaa, S.Farm | Apoteker | Farmasi |
+| Puri Puspita Sari, A.Md.Kep | Perawat | Keperawatan |
+| Annisa Sarah Agustina, A.Md.Kes | Perawat | Keperawatan |
+| Aljan, A.Md.Farm | Asisten Apoteker | Farmasi |
+| Maya Siti Nurbaya | Administrasi 1 | Front Office |
+| Irma Marlina | Administrasi 2 | Front Office |
+
+---
+
+### 4. `appointments` — Data Reservasi Pasien (Sudah Berjalan)
+
+> Tabel ini **sudah digunakan** di `app/api/reservasi/route.ts`. Berikut schema formalnya untuk dokumentasi dan keperluan migrasi.
+
+```sql
+CREATE TABLE appointments (
+  id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  kode_booking        TEXT        NOT NULL UNIQUE,        -- "CPTK-XXXXX"
+  nik                 CHAR(16)    NOT NULL,
+  nama_pasien         VARCHAR(150) NOT NULL,
+  no_hp               VARCHAR(15)  NOT NULL,
+  poli_tujuan         TEXT        NOT NULL,               -- "Poli Umum - Pagi"
+  sesi_kunjungan      TEXT,                               -- Kolom cadangan (opsional)
+  tanggal_kunjungan   DATE        NOT NULL,
+  status              TEXT        NOT NULL DEFAULT 'Menunggu',  -- 'Menunggu', 'Hadir', 'Batal'
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT valid_status CHECK (status IN ('Menunggu', 'Hadir', 'Batal', 'Selesai'))
+);
+
+-- Index untuk performa query di route.ts
+CREATE INDEX idx_appointments_tanggal ON appointments(tanggal_kunjungan);
+CREATE INDEX idx_appointments_nik ON appointments(nik);
+CREATE INDEX idx_appointments_no_hp ON appointments(no_hp);
+```
+
+> [!WARNING]
+> Field `poli_tujuan` di tabel ini menyimpan format `"Poli Umum - Pagi"` (gabungan poli+sesi). Ini sudah berjalan di production. Pertimbangkan untuk menambah kolom `service_id UUID REFERENCES services(id)` dan `sesi TEXT CHECK (sesi IN ('Pagi', 'Sore'))` saat refactoring tahap berikutnya.
+
+---
+
+### 5. `clinic_info` — Informasi Statis Klinik (Opsional, CMS-Ready)
+
+> Menggantikan `config/site.ts`. Berguna jika admin klinik ingin mengubah alamat/kontak tanpa deploy ulang.
+
+```sql
+CREATE TABLE clinic_info (
+  key         TEXT PRIMARY KEY,   -- "nama_klinik", "alamat", "wa_number"
+  value       TEXT NOT NULL,
+  label       TEXT,               -- Label untuk admin panel (opsional)
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**Seed Data Awal:**
+
+| key | value |
+|---|---|
+| `nama_klinik` | Klinik Pratama Cipatik |
+| `wa_raw` | 628999801472 |
+| `wa_display` | +62 899-9801-472 |
+| `phone_raw` | +628999801472 |
+| `phone_display` | 0899-9801-472 |
+| `email` | halo@klinikcipatik.com |
+| `alamat_baris_1` | Jl. Raya Cipatik No. 123 |
+| `alamat_baris_2` | Kabupaten Bandung Barat |
+| `alamat_baris_3` | Jawa Barat, Indonesia |
+| `maps_link` | https://maps.google.com/... |
+| `maps_embed` | https://www.google.com/maps/embed?... |
+
+---
+
+### 6. `clinic_content` — Konten Halaman Tentang (Opsional)
+
+> Menggantikan teks Visi, Misi, dan Nilai Inti di `app/tentang/page.tsx`.
+
+```sql
+CREATE TABLE clinic_content (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  section    TEXT        NOT NULL,       -- "visi", "misi", "nilai_inti"
+  judul      TEXT        NOT NULL,
+  isi        TEXT        NOT NULL,
+  urutan     INTEGER     NOT NULL DEFAULT 0,
+  is_active  BOOLEAN     NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+---
+
+## Row Level Security (RLS) — Rekomendasi
+
+```sql
+-- Tabel publik (bisa dibaca siapa saja, tidak bisa diubah dari client)
+ALTER TABLE services         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE doctor_schedule  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE staff            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE clinic_info      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE clinic_content   ENABLE ROW LEVEL SECURITY;
+
+-- Hanya boleh SELECT (read-only untuk anonymous)
+CREATE POLICY "public_read_services"    ON services        FOR SELECT USING (is_active = TRUE);
+CREATE POLICY "public_read_schedule"   ON doctor_schedule  FOR SELECT USING (TRUE);
+CREATE POLICY "public_read_staff"      ON staff            FOR SELECT USING (is_active = TRUE);
+CREATE POLICY "public_read_clinic"     ON clinic_info      FOR SELECT USING (TRUE);
+CREATE POLICY "public_read_content"    ON clinic_content   FOR SELECT USING (is_active = TRUE);
+
+-- Tabel appointments: tidak boleh dibaca/diubah langsung dari client (hanya via Service Role di API Route)
+ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
+-- Tidak ada policy publik → default DENY dari client
+```
+
+---
+
+## Pemetaan Dampak File Frontend
+
+| Tabel DB | File yang Harus Dimodifikasi | Perubahan yang Diperlukan |
+|---|---|---|
+| `services` | `app/page.tsx` | Hapus 4 kartu hardcoded, fetch dari `GET /api/layanan` |
+| `services` | `app/api/layanan/route.ts` | Sudah ada `from('services').select('*')` ✅ |
+| `services` | `app/reservasi/page.tsx` | `POLI_OPTIONS` diambil dari DB, bukan array statis |
+| `doctor_schedule` | `app/page.tsx` | Hapus 3 kartu jadwal hardcoded, fetch dari API |
+| `doctor_schedule` | `app/page.tsx` (fungsi `checkStatusKlinik`) | Logika jam buka/tutup dibaca dari DB, bukan hardcoded |
+| `staff` | `app/page.tsx` | Hapus `dataTimMedis`, fetch dari `GET /api/staff` (baru) |
+| `appointments` | `app/api/reservasi/route.ts` | Tidak perlu diubah signifikan ✅ |
+| `clinic_info` | `config/site.ts` | Opsional: bisa tetap file statis, atau diganti fetch saat runtime |
+| `clinic_content` | `app/tentang/page.tsx` | Fetch Visi/Misi/Nilai dari DB, bukan JSX statis |
+
+---
+
+## API Routes yang Perlu Dibuat
+
+| Method | Path | Tabel | Keterangan |
+|---|---|---|---|
+| `GET` | `/api/layanan` | `services` | **Sudah ada** ✅ |
+| `GET` | `/api/jadwal` | `doctor_schedule` + `services` | **Perlu dibuat** |
+| `GET` | `/api/staff` | `staff` | **Perlu dibuat** |
+| `POST` | `/api/reservasi` | `appointments` | **Sudah ada** ✅ |
+| `GET` | `/api/konten` | `clinic_info` + `clinic_content` | **Opsional** |
+
+---
+
+## Urutan Eksekusi yang Disarankan
+
+```mermaid
+flowchart TD
+    A["1. Buat tabel services di Supabase\n+ seed 4 poli"] --> B
+    B["2. Buat tabel doctor_schedule\n+ seed 6 baris jadwal"] --> C
+    C["3. Buat tabel staff\n+ seed 9 anggota tim"] --> D
+    D["4. Validasi appointments\n(sudah ada, tambah index)"] --> E
+    E["5. Buat GET /api/jadwal\n& GET /api/staff"] --> F
+    F["6. Modifikasi app/page.tsx\n(ganti hardcode → fetch)"] --> G
+    G["7. Modifikasi app/reservasi/page.tsx\n(POLI_OPTIONS dari DB)"] --> H
+    H["8. (Opsional) clinic_info & clinic_content"]
+```
+
+---
+
+> [!TIP]
+> **Strategi Caching:** Untuk `services`, `doctor_schedule`, dan `staff` yang jarang berubah, gunakan `fetch` dengan `{ next: { revalidate: 3600 } }` (ISR) di Next.js App Router agar data di-cache 1 jam dan tidak membebani Supabase setiap request.

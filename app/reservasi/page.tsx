@@ -14,13 +14,62 @@ import { motion, AnimatePresence } from "framer-motion";
 const POLI_OPTIONS = ["Poli Umum", "Poli Gigi", "Poli KIA"] as const;
 const SESI_OPTIONS = ["Pagi (08:00 - 12:00)", "Sore (14:00 - 18:00)"] as const;
 
+// Helper: hitung max date (hari ini + 30 hari) dalam zona Jakarta
+const getMaxBookingDate = () => {
+  const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
+  now.setDate(now.getDate() + 30);
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
+
 const reservasiSchema = z.object({
-  nik: z.string().length(16, { message: "NIK wajib 16 digit angka" }).regex(/^\d+$/, "NIK hanya berisi angka"),
-  namaLengkap: z.string().trim().min(3, { message: "Nama lengkap minimal 3 karakter" }).max(120, { message: "Nama terlalu panjang" }),
-  noHp: z.string().regex(/^08\d{8,13}$/, "Format HP tidak valid (mulai dengan 08)"),
+  nik: z
+    .string()
+    .length(16, { message: "NIK wajib 16 digit angka" })
+    .regex(/^\d+$/, "NIK hanya berisi angka"),
+
+  namaLengkap: z
+    .string()
+    .trim()
+    .min(3, { message: "Nama lengkap minimal 3 karakter" })
+    .max(120, { message: "Nama terlalu panjang (maks. 120 karakter)" })
+    .regex(
+      /^[a-zA-Z\s.,'-]+$/,
+      "Nama hanya boleh berisi huruf, spasi, dan tanda baca dasar (titik/koma)."
+    )
+    .transform((val) => val.replace(/\s+/g, ' ').trim()),
+
+  noHp: z
+    .string()
+    .regex(
+      /^08[0-9]{7,11}$/,
+      "Nomor HP harus diawali '08' dan terdiri dari 9-13 angka."
+    ),
+
   poliTujuan: z.enum(POLI_OPTIONS, { message: "Pilih Poli tujuan" }),
   sesiKunjungan: z.enum(SESI_OPTIONS, { message: "Pilih Sesi Kedatangan" }),
-  tanggalKunjungan: z.string().min(1, { message: "Pilih tanggal kehadiran" }),
+
+  tanggalKunjungan: z
+    .string()
+    .min(1, { message: "Pilih tanggal kehadiran" })
+    .refine((val) => {
+      if (!val) return false;
+      const selected = new Date(val + 'T00:00:00');
+      const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return selected >= today;
+    }, { message: "Tanggal kunjungan tidak boleh di masa lalu." })
+    .refine((val) => {
+      if (!val) return false;
+      const selected = new Date(val + 'T00:00:00');
+      const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
+      const maxDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30);
+      return selected <= maxDate;
+    }, { message: "Reservasi hanya tersedia untuk 30 hari ke depan." })
+    .refine((val) => {
+      if (!val) return false;
+      const selected = new Date(val + 'T00:00:00');
+      return selected.getDay() !== 0;
+    }, { message: "Klinik tutup di hari Minggu. Pilih hari lain." }),
 });
 
 type ReservasiFormValues = z.infer<typeof reservasiSchema>;
@@ -31,6 +80,7 @@ interface BookingInfo {
   poli: string;
   sesi: string;
   nama: string;
+  adminBatal?: boolean; // flag dari pengecekan server
 }
 
 export default function ReservasiPage() {
@@ -39,12 +89,16 @@ export default function ReservasiPage() {
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [jalurLayanan, setJalurLayanan] = useState<"Umum" | "BPJS" | null>(null);
   const [minDate, setMinDate] = useState("");
+  const [maxDate, setMaxDate] = useState("");
   
   const [activeTickets, setActiveTickets] = useState<BookingInfo[]>([]);
   const [bookingInfo, setBookingInfo] = useState<BookingInfo | null>(null);
-  const [showTicketModal, setShowTicketModal] = useState(false); 
-  const MAX_TICKETS = 3; 
-  
+  const [showTicketModal, setShowTicketModal] = useState(false);
+  const [cancelledNotices, setCancelledNotices] = useState<BookingInfo[]>([]);
+  const [disabledSessions, setDisabledSessions] = useState<string[]>([]);
+  const [sesiMessage, setSesiMessage] = useState("");
+  const MAX_TICKETS = 3;
+
   const formTopRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -65,44 +119,82 @@ export default function ReservasiPage() {
       const day = String(targetDate.getDate()).padStart(2, '0');
       
       setMinDate(`${year}-${month}-${day}`);
+      // Hitung maxDate (hari ini + 30 hari)
+      setMaxDate(getMaxBookingDate());
     };
 
-    const loadTickets = () => {
+    const loadTickets = async () => {
       const saved = localStorage.getItem("cipatik_tickets");
-      if (saved) {
-        try {
-          const parsedTickets: BookingInfo[] = JSON.parse(saved);
-          const today = new Date();
-          today.setHours(0,0,0,0);
-
-          const validTickets = parsedTickets.filter(ticket => {
-            const [year, month, day] = ticket.tanggal.split('-').map(Number);
-            const ticketDate = new Date(year, month - 1, day);
-            ticketDate.setHours(0,0,0,0);
-            return ticketDate >= today;
-          });
-
-          setActiveTickets(validTickets);
-          localStorage.setItem("cipatik_tickets", JSON.stringify(validTickets));
-        } catch (e) {
-          localStorage.removeItem("cipatik_tickets");
+      if (!saved) return;
+      try {
+        const parsedTickets: BookingInfo[] = JSON.parse(saved);
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const validTickets = parsedTickets.filter(ticket => {
+          const [y, m, d] = ticket.tanggal.split('-').map(Number);
+          const td = new Date(y, m - 1, d); td.setHours(0, 0, 0, 0);
+          return td >= today;
+        });
+        // Cek status dari server (deteksi pembatalan admin)
+        if (validTickets.length > 0) {
+          try {
+            const kodes = validTickets.map(t => t.kode).join(',');
+            const res = await fetch(`/api/cek-tiket?kodes=${kodes}`);
+            const json = await res.json();
+            if (json.data) {
+              const cancelledCodes = new Set<string>(
+                json.data.filter((d: any) => d.status === 'Batal').map((d: any) => d.kode_booking)
+              );
+              const stillActive = validTickets.filter(t => !cancelledCodes.has(t.kode));
+              const adminCancelled = validTickets.filter(t => cancelledCodes.has(t.kode));
+              if (adminCancelled.length > 0) setCancelledNotices(adminCancelled);
+              setActiveTickets(stillActive);
+              localStorage.setItem("cipatik_tickets", JSON.stringify(stillActive));
+              return;
+            }
+          } catch { /* server cek gagal, lanjut normal */ }
         }
+        setActiveTickets(validTickets);
+        localStorage.setItem("cipatik_tickets", JSON.stringify(validTickets));
+      } catch {
+        localStorage.removeItem("cipatik_tickets");
       }
     };
 
     calculateMinDate();
     loadTickets();
 
-    return () => {
-      abortControllerRef.current?.abort();
-    };
+    return () => { abortControllerRef.current?.abort(); };
   }, []);
 
-  const { register, handleSubmit, reset, watch, formState: { errors } } = useForm<ReservasiFormValues>({
+  const { register, handleSubmit, reset, watch, setValue, resetField, formState: { errors } } = useForm<ReservasiFormValues>({
     resolver: zodResolver(reservasiSchema),
   });
-  
+
   const watchSesi = watch("sesiKunjungan");
+  const watchDate = watch("tanggalKunjungan");
+
+  // Hitung sesi yang dinonaktifkan berdasarkan tanggal & waktu sekarang (WIB)
+  useEffect(() => {
+    if (!watchDate) { setDisabledSessions([]); setSesiMessage(""); return; }
+    const now = new Date();
+    const jakartaNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
+    const [y, m, d] = watchDate.split('-').map(Number);
+    const selectedMidnight = new Date(y, m - 1, d);
+    const todayMidnight = new Date(jakartaNow.getFullYear(), jakartaNow.getMonth(), jakartaNow.getDate());
+    if (selectedMidnight.getTime() !== todayMidnight.getTime()) {
+      setDisabledSessions([]); setSesiMessage(""); return;
+    }
+    const mins = jakartaNow.getHours() * 60 + jakartaNow.getMinutes();
+    const disabled: string[] = [];
+    if (mins >= 12 * 60) disabled.push("Pagi (08:00 - 12:00)");
+    if (mins >= 18 * 60) disabled.push("Sore (14:00 - 18:00)");
+    setDisabledSessions(disabled);
+    if (disabled.length === 2) setSesiMessage("⚠️ Semua sesi hari ini telah berakhir. Silakan pilih tanggal berikutnya.");
+    else if (disabled.length === 1) setSesiMessage("ℹ️ Sesi Pagi sudah berakhir. Hanya tersedia Sesi Sore.");
+    else setSesiMessage("");
+    // Auto-reset sesi jika yang dipilih sudah kadaluarsa
+    if (watchSesi && disabled.includes(watchSesi)) resetField("sesiKunjungan");
+  }, [watchDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const scrollToTop = () => {
     if (formTopRef.current) {
@@ -197,9 +289,105 @@ export default function ReservasiPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 pt-28 pb-20 selection:bg-teal-200">
-      
+
+      {/* ── NOTIFIKASI PEMBATALAN — MODAL PROFESIONAL ── */}
+      <AnimatePresence>
+        {cancelledNotices.length > 0 && (
+          <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center px-0 sm:px-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.25 }}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-[3px]"
+              onClick={() => setCancelledNotices([])}
+            />
+            {/* Sheet */}
+            <motion.div
+              initial={{ opacity: 0, y: 60 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 60 }}
+              transition={{ type: "spring", stiffness: 280, damping: 30 }}
+              className="relative z-10 bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden"
+            >
+              {/* Accent top bar */}
+              <div className="h-1 w-full bg-gradient-to-r from-amber-400 via-orange-400 to-amber-400" />
+
+              {/* Drag indicator (mobile) */}
+              <div className="flex justify-center pt-3 sm:hidden">
+                <div className="w-10 h-1 bg-slate-200 rounded-full" />
+              </div>
+
+              {/* Header */}
+              <div className="px-6 pt-5 pb-4 flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-100 flex items-center justify-center shrink-0">
+                  <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <p className="font-bold text-slate-900 text-base leading-tight">Pemberitahuan Reservasi</p>
+                  <p className="text-amber-600 text-xs font-semibold mt-0.5">Dari Klinik Pratama Cipatik</p>
+                </div>
+                <button onClick={() => setCancelledNotices([])} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors -mr-1 shrink-0">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="px-6 pb-2">
+                <p className="text-slate-600 text-sm leading-relaxed">
+                  Mohon maaf atas ketidaknyamanannya. Reservasi berikut telah <span className="font-semibold text-slate-800">dibatalkan oleh pihak klinik</span>. Anda dapat melakukan pendaftaran ulang kapan saja.
+                </p>
+
+                {/* Cancelled tickets */}
+                <div className="space-y-2.5 mt-4">
+                  {cancelledNotices.map(ticket => (
+                    <div key={ticket.kode} className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-mono font-black text-sm text-slate-900 tracking-wider bg-white border border-slate-200 px-2.5 py-1 rounded-lg shadow-sm">
+                          {ticket.kode}
+                        </span>
+                        <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                          Dibatalkan
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                        <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">{ticket.poli}</span>
+                        <span className="text-slate-300">·</span>
+                        <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">{ticket.sesi}</span>
+                        <span className="text-slate-300">·</span>
+                        <span className="text-xs text-slate-500">{ticket.tanggal}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-xs text-slate-400 mt-3 leading-relaxed">
+                  Jika ada pertanyaan, silakan hubungi klinik langsung melalui WhatsApp atau telepon.
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="px-6 pt-4 pb-6 flex gap-3">
+                <button
+                  onClick={() => setCancelledNotices([])}
+                  className="flex-1 py-3.5 rounded-2xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 active:scale-[0.98] transition-all"
+                >
+                  Tutup
+                </button>
+                <button
+                  onClick={() => setCancelledNotices([])}
+                  className="flex-1 py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-500 active:scale-[0.98] text-white text-sm font-bold transition-all shadow-lg shadow-teal-600/20"
+                >
+                  Daftar Ulang
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+
       {/* ========================================================================
-          TICKET MODAL (POPUP) 
+          TICKET MODAL (POPUP)
       ======================================================================== */}
       <AnimatePresence>
         {showTicketModal && (
@@ -391,6 +579,16 @@ export default function ReservasiPage() {
                                     <IdCard className={`absolute left-4 top-3.5 w-5 h-5 ${errors.nik ? 'text-red-500' : 'text-slate-400'}`} />
                                     <input 
                                       id="nik" type="text" maxLength={16} inputMode="numeric" {...register("nik")} placeholder="Masukkan 16 Digit NIK di KTP" 
+                                      onKeyDown={(e) => {
+                                        const allowed = ['Backspace','Delete','Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
+                                        if (!allowed.includes(e.key) && !/^\d$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+                                          e.preventDefault();
+                                        }
+                                      }}
+                                      onPaste={(e) => {
+                                        const paste = e.clipboardData.getData('text');
+                                        if (!/^\d+$/.test(paste)) e.preventDefault();
+                                      }}
                                       className={`block w-full pl-11 pr-4 py-3 bg-white border-2 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none transition-colors ${errors.nik ? 'border-red-300 focus:border-red-500' : 'border-slate-200 focus:border-teal-500 hover:border-slate-300'}`} 
                                     />
                                   </div>
@@ -400,7 +598,19 @@ export default function ReservasiPage() {
                                 <div>
                                   <label htmlFor="namaLengkap" className="block text-sm font-bold text-slate-700 mb-1.5">Nama Lengkap</label>
                                   <input 
-                                    id="namaLengkap" type="text" {...register("namaLengkap")} placeholder="Sesuai KTP" 
+                                    id="namaLengkap" type="text" {...register("namaLengkap")} placeholder="Sesuai KTP"
+                                    autoComplete="name"
+                                    onKeyDown={(e) => {
+                                      // Blokir karakter yang tidak diizinkan secara real-time
+                                      const allowed = ['Backspace','Delete','Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Enter'];
+                                      if (!allowed.includes(e.key) && !/^[a-zA-Z\s.,'-]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+                                        e.preventDefault();
+                                      }
+                                    }}
+                                    onPaste={(e) => {
+                                      const paste = e.clipboardData.getData('text');
+                                      if (!/^[a-zA-Z\s.,'-]+$/.test(paste)) e.preventDefault();
+                                    }}
                                     className={`block w-full px-4 py-3 bg-white border-2 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none transition-colors ${errors.namaLengkap ? 'border-red-300 focus:border-red-500' : 'border-slate-200 focus:border-teal-500 hover:border-slate-300'}`} 
                                   />
                                   {errors.namaLengkap && <p className="text-red-500 text-xs font-medium mt-1">{errors.namaLengkap.message}</p>}
@@ -411,7 +621,21 @@ export default function ReservasiPage() {
                                   <div className="relative">
                                     <Phone className={`absolute left-4 top-3.5 w-4 h-4 ${errors.noHp ? 'text-red-500' : 'text-slate-400'}`} />
                                     <input 
-                                      id="noHp" type="tel" maxLength={15} inputMode="tel" {...register("noHp")} placeholder="08..." 
+                                      id="noHp" type="tel" maxLength={13} inputMode="numeric" {...register("noHp")} placeholder="08..."
+                                      autoComplete="tel"
+                                      onKeyDown={(e) => {
+                                        // Hanya izinkan angka — blokir spasi, +, -, huruf, dsb.
+                                        const allowed = ['Backspace','Delete','Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
+                                        if (!allowed.includes(e.key) && !/^\d$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+                                          e.preventDefault();
+                                        }
+                                      }}
+                                      onPaste={(e) => {
+                                        const paste = e.clipboardData.getData('text').replace(/\D/g, '');
+                                        e.preventDefault();
+                                        // Insert hanya digit dari clipboard
+                                        document.execCommand('insertText', false, paste);
+                                      }}
                                       className={`block w-full pl-11 pr-4 py-3 bg-white border-2 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none transition-colors ${errors.noHp ? 'border-red-300 focus:border-red-500' : 'border-slate-200 focus:border-teal-500 hover:border-slate-300'}`} 
                                     />
                                   </div>
@@ -446,7 +670,7 @@ export default function ReservasiPage() {
                                   <div className="relative">
                                     <CalendarDays className={`absolute left-4 top-3.5 w-4 h-4 ${errors.tanggalKunjungan ? 'text-red-500' : 'text-slate-400'}`} />
                                     <input 
-                                      id="tanggalKunjungan" type="date" min={minDate} {...register("tanggalKunjungan")} 
+                                      id="tanggalKunjungan" type="date" min={minDate} max={maxDate} {...register("tanggalKunjungan")} 
                                       className={`block w-full pl-11 pr-4 py-3 bg-white border-2 rounded-xl text-sm font-medium text-slate-900 focus:outline-none transition-colors cursor-pointer ${errors.tanggalKunjungan ? 'border-red-300 focus:border-red-500' : 'border-slate-200 focus:border-teal-500 hover:border-slate-300'}`} 
                                     />
                                   </div>
@@ -454,32 +678,49 @@ export default function ReservasiPage() {
                                 </div>
                               </div>
 
-                              {/* ANIMASI ESTIMASI KEDATANGAN DENGAN FRAMER MOTION LAYOUTID */}
+                              {/* ESTIMASI KEDATANGAN */}
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-2">Estimasi Kedatangan</label>
+                                {sesiMessage && (
+                                  <div className={`text-xs font-medium px-3 py-2 rounded-lg mb-2 ${
+                                    disabledSessions.length === 2 ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  }`}>{sesiMessage}</div>
+                                )}
                                 <div className="relative flex bg-slate-100 p-1.5 rounded-xl">
                                   {SESI_OPTIONS.map((sesi, idx) => {
-                                    const title = sesi.split(' ')[0]; 
-                                    const time = sesi.split(' ')[1] + ' ' + sesi.split(' ')[2] + ' ' + sesi.split(' ')[3]; 
+                                    const title = sesi.split(' ')[0];
+                                    const time = sesi.split(' ')[1] + ' ' + sesi.split(' ')[2] + ' ' + sesi.split(' ')[3];
                                     const isSelected = watchSesi === sesi;
-                                    
+                                    const isDisabled = disabledSessions.includes(sesi);
                                     return (
-                                      <label key={sesi} htmlFor={`sesi-${idx}`} className={`relative flex-1 text-center py-2.5 rounded-lg cursor-pointer z-10 transition-colors ${isSelected ? 'text-teal-700' : 'text-slate-500 hover:text-slate-700'}`}>
-                                        <input id={`sesi-${idx}`} type="radio" value={sesi} {...register("sesiKunjungan")} className="sr-only" />
-                                        
-                                        {/* Background pill animation */}
-                                        {isSelected && (
-                                          <motion.div 
+                                      <label
+                                        key={sesi}
+                                        htmlFor={`sesi-${idx}`}
+                                        className={`relative flex-1 text-center py-2.5 rounded-lg z-10 transition-colors select-none ${
+                                          isDisabled
+                                            ? 'opacity-40 cursor-not-allowed'
+                                            : isSelected ? 'text-teal-700 cursor-pointer' : 'text-slate-500 hover:text-slate-700 cursor-pointer'
+                                        }`}
+                                      >
+                                        <input
+                                          id={`sesi-${idx}`} type="radio" value={sesi}
+                                          {...register("sesiKunjungan")}
+                                          disabled={isDisabled}
+                                          className="sr-only"
+                                        />
+                                        {isSelected && !isDisabled && (
+                                          <motion.div
                                             layoutId="activeSesiBackground"
                                             className="absolute inset-0 bg-white shadow-sm ring-1 ring-slate-200/50 rounded-lg -z-10"
                                             transition={{ type: "spring", stiffness: 300, damping: 30 }}
                                           />
                                         )}
-                                        
                                         <span className="block text-sm font-bold">{title}</span>
-                                        <span className="block text-[10px] font-medium mt-0.5">{time}</span>
+                                        <span className="block text-[10px] font-medium mt-0.5">
+                                          {isDisabled ? 'Sesi Berakhir' : time}
+                                        </span>
                                       </label>
-                                    )
+                                    );
                                   })}
                                 </div>
                                 {errors.sesiKunjungan && <p className="text-red-500 text-xs font-medium mt-1.5">{errors.sesiKunjungan.message}</p>}
