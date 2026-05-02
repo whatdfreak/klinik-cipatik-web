@@ -1,16 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useEffect } from "react";
+import Link from "next/link";
+
 import { motion, Variants, useReducedMotion } from "framer-motion";
+
 import { siteConfig } from "@/config/site";
 import StaffCarouselClient from "@/components/ui/StaffCarouselClient";
 
 export default function Home() {
 
-  // ============================================================================
-  // LOGIC 2: REAL-TIME CONTEXTUAL SCHEDULE (WIB)
-  // ============================================================================
   const [mounted, setMounted] = useState(false);
   const [statusWaktu, setStatusWaktu] = useState({ isOpen: false, text: "Memuat...", color: "emerald", detail: "Jadwal Praktik" });
   const [bpjsLogoError, setBpjsLogoError] = useState(false);

@@ -57,7 +57,6 @@ const jsonHeaders = {
   Pragma: 'no-cache',
 };
 
-// 1. ZOD SCHEMA (SERVER-SIDE - STRICT)
 const serverSchema = z.object({
   nik: z.string().length(16).regex(/^\d+$/),
 
@@ -155,7 +154,6 @@ const sendWhatsAppNotification = async (no_hp: string, nama: string, kode: strin
     if (!result.status) {
       console.error("❌ Fonnte API Error:", result.reason);
     } else {
-      console.log(`✅ WhatsApp sent successfully to ${no_hp}`);
     }
   } catch (error) {
     console.error("❌ Failed to send WhatsApp notification:", error);
@@ -199,7 +197,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Permintaan ditolak oleh sistem keamanan.' }, { status: 400, headers: jsonHeaders });
     }
 
-    // 2. VALIDASI ZOD SERVER
     const parseResult = serverSchema.safeParse(body);
     if (!parseResult.success) {
       return NextResponse.json({ error: 'Data tidak valid atau format salah. Ditolak oleh server.' }, { status: 400, headers: jsonHeaders });
@@ -225,7 +222,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // 3. VALIDASI TANGGAL LANJUTAN (fallback guard — sudah dicek Zod, ini lapisan keamanan ganda)
     const targetDate = new Date(tanggal_kunjungan + 'T00:00:00+07:00');
     const today = jakartaTodayDateOnly();
     targetDate.setHours(0, 0, 0, 0);
@@ -244,7 +240,6 @@ export async function POST(request: Request) {
 
     const poliGabungan = `${poli_tujuan} - ${sesi_kunjungan}`;
 
-    // 4. RATE LIMIT & DOUBLE BOOKING GUARD
     const { data: existingRecords, error: checkError } = await supabaseAdmin
       .from('appointments')
       .select('id, nik, no_hp, poli_tujuan')
@@ -255,7 +250,6 @@ export async function POST(request: Request) {
     if (checkError) throw checkError;
 
     if (existingRecords) {
-      // Guard A: NIK rules berdasarkan SOP
       const sameNik = existingRecords.filter(r => r.nik === nik);
       if (!ALLOW_MULTI_BOOKING_SAME_NIK_PER_DAY && sameNik.length > 0) {
         return NextResponse.json({ error: 'NIK ini sudah terdaftar untuk tanggal tersebut.' }, { status: 409, headers: jsonHeaders });
@@ -271,20 +265,17 @@ export async function POST(request: Request) {
         }
       }
       
-      // Guard B: Anti-Spam (1 No HP maks 3 pendaftaran di hari yang sama)
       const samePhone = existingRecords.filter(r => r.no_hp === no_hp);
       if (samePhone.length >= MAX_BOOKING_PER_PHONE_PER_DAY) {
         return NextResponse.json({ error: 'Nomor HP ini telah mencapai batas maksimal 3 pendaftaran per hari.' }, { status: 429, headers: jsonHeaders });
       }
 
-      // Guard C: No HP yang sama tidak boleh ambil sesi/poli yang sama di hari yang sama
       const samePhoneSameSession = samePhone.some((r) => r.poli_tujuan === poliGabungan);
       if (samePhoneSameSession) {
         return NextResponse.json({ error: 'Sesi untuk nomor HP ini sudah terdaftar di tanggal yang sama.' }, { status: 409, headers: jsonHeaders });
       }
     }
 
-    // Guard D: Batas kapasitas per poli+sesi per hari
     const { count: sessionCount, error: sessionCountError } = await supabaseAdmin
       .from('appointments')
       .select('id', { count: 'exact', head: true })
@@ -300,7 +291,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // 5. INSERT VIA SERVICE ROLE
     const kode_booking = await generateUniqueBookingCode();
     const { data, error } = await supabaseAdmin
       .from('appointments')
@@ -320,7 +310,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Gagal menyimpan data ke sistem antrean klinik.' }, { status: 500, headers: jsonHeaders });
     }
 
-    // 6. WHATSAPP NOTIFICATION (NON-BLOCKING / FIRE & FORGET)
     sendWhatsAppNotification(no_hp, nama_pasien, kode_booking, tanggal_kunjungan, poli_tujuan, sesi_kunjungan).catch(err => {
       console.error("Unhandled error in WhatsApp notification background task:", err);
     });

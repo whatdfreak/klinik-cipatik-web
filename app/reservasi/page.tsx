@@ -2,19 +2,16 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { CalendarDays, CreditCard, Stethoscope, User, Phone, IdCard, AlertCircle, Loader2, Info, ExternalLink, Ticket, Clock, Users, RefreshCcw, CheckCircle2, X, ChevronDown, ArrowLeft, Printer } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { CalendarDays, CreditCard, Stethoscope, User, Phone, IdCard, AlertCircle, Loader2, Info, ExternalLink, Ticket, Clock, Users, RefreshCcw, CheckCircle2, X, ChevronDown, ArrowLeft, Printer } from "lucide-react";
 
-// ============================================================================
-// 1. ZOD SCHEMA & TYPES
-// ============================================================================
 const POLI_OPTIONS = ["Poli Umum", "Poli Gigi", "Poli KIA"] as const;
 const SESI_OPTIONS = ["Pagi (08:00 - 12:00)", "Sore (14:00 - 18:00)"] as const;
 
-// Helper: hitung max date (hari ini + 30 hari) dalam zona Jakarta
 const getMaxBookingDate = () => {
   const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
   now.setDate(now.getDate() + 30);
@@ -303,7 +300,6 @@ export default function ReservasiPage() {
       scrollToTop();
 
     } catch (error: any) {
-      console.error("Gagal reservasi:", error);
       if (error?.name === "AbortError") {
         setSubmitError("Server lambat merespons. Periksa koneksi Anda.");
       } else {
@@ -572,7 +568,6 @@ export default function ReservasiPage() {
               <div className="overflow-y-auto">
                 <AnimatePresence mode="wait">
                   {activeTickets.length > 0 && !showMultiRecovery ? (
-                    /* ── STATE 1: ADA TIKET ── */
                     <motion.div key="has-tickets" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-6 space-y-4 bg-slate-50">
                       <AnimatePresence>
                         {activeTickets.map((ticket) => (
@@ -621,7 +616,6 @@ export default function ReservasiPage() {
                       )}
                     </motion.div>
                   ) : (
-                    /* ── STATE 2: KOSONG / TICKET RECOVERY ── */
                     <motion.div key="no-tickets" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-6">
                       {activeTickets.length > 0 && showMultiRecovery && (
                         <button onClick={() => setShowMultiRecovery(false)} className="text-sm font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1 mb-4">
@@ -1026,9 +1020,6 @@ export default function ReservasiPage() {
                   )}
                 </motion.div>
               ) : (
-                // ============================================================================
-                // 3. SUCCESS STATE (TIKET BARU)
-                // ============================================================================
                 <motion.div
                   key="success-ticket"
                   initial={{ opacity: 0, y: 20 }}
