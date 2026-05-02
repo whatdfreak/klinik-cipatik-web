@@ -202,8 +202,8 @@ export default function Home() {
       {/* 3. FASILITAS & LAYANAN MEDIS */}
       <section id="layanan" className="py-20 md:py-28 bg-slate-50 relative overflow-hidden scroll-mt-20 border-t border-slate-100">
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
-          <div className="absolute top-[20%] -left-[10%] w-[400px] h-[400px] rounded-full bg-teal-200/30 blur-[100px] opacity-50"></div>
-          <div className="absolute bottom-[10%] -right-[10%] w-[500px] h-[500px] rounded-full bg-blue-200/20 blur-[100px] opacity-50"></div>
+          <div className="hidden md:block absolute top-[20%] -left-[10%] w-[300px] h-[300px] rounded-full bg-teal-200/25 blur-[80px] opacity-50"></div>
+          <div className="hidden md:block absolute bottom-[10%] -right-[10%] w-[350px] h-[350px] rounded-full bg-blue-200/15 blur-[80px] opacity-50"></div>
         </div>
 
         <motion.div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10" initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.2 }} variants={staggerContainer}>
@@ -264,7 +264,7 @@ export default function Home() {
       {/* 4. JADWAL PRAKTIK SECTION */}
       <section id="jadwal" className="py-20 md:py-28 bg-white relative overflow-hidden scroll-mt-20 border-t border-slate-100">
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
-          <div className="absolute bottom-[20%] -left-[10%] w-[300px] h-[300px] rounded-full bg-teal-100/40 blur-[80px] opacity-60"></div>
+          <div className="hidden md:block absolute bottom-[20%] -left-[10%] w-[250px] h-[250px] rounded-full bg-teal-100/40 blur-[60px] opacity-60"></div>
         </div>
 
         <motion.div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10" initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.2 }} variants={staggerContainer}>
@@ -382,8 +382,8 @@ export default function Home() {
       {/* 5. ALUR PELAYANAN */}
       <section className="py-20 md:py-28 bg-slate-50 border-t border-slate-100 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
-          <div className="absolute -top-[10%] -left-[10%] w-[500px] h-[500px] rounded-full bg-teal-200/30 blur-[100px] opacity-60"></div>
-          <div className="absolute top-[20%] -right-[10%] w-[400px] h-[400px] rounded-full bg-blue-200/30 blur-[100px] opacity-60"></div>
+          <div className="hidden md:block absolute -top-[10%] -left-[10%] w-[350px] h-[350px] rounded-full bg-teal-200/25 blur-[80px] opacity-60"></div>
+          <div className="hidden md:block absolute top-[20%] -right-[10%] w-[300px] h-[300px] rounded-full bg-blue-200/25 blur-[80px] opacity-60"></div>
         </div>
 
         <motion.div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10" initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.2 }} variants={staggerContainer}>
