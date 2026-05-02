@@ -125,6 +125,43 @@ const generateUniqueBookingCode = async (): Promise<string> => {
   throw new Error('Gagal menghasilkan kode booking unik.');
 };
 
+const sendWhatsAppNotification = async (no_hp: string, nama: string, kode: string, tanggal: string, poli: string, sesi: string) => {
+  try {
+    const token = process.env.FONNTE_TOKEN;
+    if (!token) {
+      console.warn("FONNTE_TOKEN is missing. WhatsApp notification skipped.");
+      return;
+    }
+
+    const tglFormatted = new Date(tanggal).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+    const sesiFormatted = sesi.includes('Pagi') ? 'Pagi (08:00 - 12:00)' : 'Sore (14:00 - 18:00)';
+
+    const message = `*PENDAFTARAN BERHASIL* 🏥\nHalo *${nama}*,\n\nBerikut adalah detail reservasi Anda di Klinik Pratama Cipatik:\n\n🎫 Kode Booking: *${kode}*\n📅 Tanggal: *${tglFormatted}*\n🩺 Poli: *${poli}*\n⏰ Sesi: *${sesiFormatted}*\n\nHarap tangkap layar (screenshot) pesan ini atau tunjukkan kepada resepsionis saat kedatangan. Datanglah 15 menit lebih awal dari sesi Anda.\n\nTerima kasih,\n*Klinik Pratama Cipatik*`;
+
+    const formData = new FormData();
+    formData.append('target', no_hp);
+    formData.append('message', message);
+    formData.append('countryCode', '62'); // Fonnte will auto-format 08 -> 628
+
+    const res = await fetch('https://api.fonnte.com/send', {
+      method: 'POST',
+      headers: {
+        'Authorization': token,
+      },
+      body: formData,
+    });
+
+    const result = await res.json();
+    if (!result.status) {
+      console.error("❌ Fonnte API Error:", result.reason);
+    } else {
+      console.log(`✅ WhatsApp sent successfully to ${no_hp}`);
+    }
+  } catch (error) {
+    console.error("❌ Failed to send WhatsApp notification:", error);
+  }
+};
+
 export async function POST(request: Request) {
   try {
     const contentType = request.headers.get('content-type') || '';
@@ -282,6 +319,11 @@ export async function POST(request: Request) {
       console.error("❌ DB Insert Error [INTERNAL]:", error);
       return NextResponse.json({ error: 'Gagal menyimpan data ke sistem antrean klinik.' }, { status: 500, headers: jsonHeaders });
     }
+
+    // 6. WHATSAPP NOTIFICATION (NON-BLOCKING / FIRE & FORGET)
+    sendWhatsAppNotification(no_hp, nama_pasien, kode_booking, tanggal_kunjungan, poli_tujuan, sesi_kunjungan).catch(err => {
+      console.error("Unhandled error in WhatsApp notification background task:", err);
+    });
 
     const successPayload = { success: true, kode_booking, data: data[0] };
     if (idempotencyKey) {
