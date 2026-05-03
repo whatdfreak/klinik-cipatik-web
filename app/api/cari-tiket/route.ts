@@ -42,15 +42,13 @@ export async function POST(request: Request) {
     const jakartaToday = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }));
     const todayStr = `${jakartaToday.getFullYear()}-${String(jakartaToday.getMonth() + 1).padStart(2, '0')}-${String(jakartaToday.getDate()).padStart(2, '0')}`;
 
-    const { data, error } = await supabaseAdmin
-      .from('appointments')
-      .select('kode_booking, nama_pasien, poli_tujuan, tanggal_kunjungan, status')
-      .eq('nik', nik)
-      .eq('no_hp', no_hp)
-      .in('status', ['Menunggu', 'Hadir'])
-      .gte('tanggal_kunjungan', todayStr)
-      .order('tanggal_kunjungan', { ascending: true })
-      .limit(10); // maksimal 10 tiket untuk keamanan
+      const { data, error } = await supabaseAdmin
+        .from('appointments')
+        .select('kode_booking, nama_pasien, poli_tujuan, tanggal_kunjungan, status')
+        .eq('nik', nik)
+        .eq('no_hp', no_hp)
+        .order('tanggal_kunjungan', { ascending: false })
+        .limit(20); // tampilkan histori 20 tiket terakhir
 
     if (error) throw error;
 
@@ -69,13 +67,14 @@ export async function POST(request: Request) {
         tanggal: row.tanggal_kunjungan,
         poli,
         sesi,
+        status: row.status,
       };
     });
 
     return NextResponse.json({ data: tickets }, { headers: jsonHeaders });
 
   } catch (error: any) {
-    console.error('❌ /api/cari-tiket error:', error);
+    // /api/cari-tiket error
     return NextResponse.json({ error: 'Terjadi kesalahan pada server.' }, { status: 500, headers: jsonHeaders });
   }
 }

@@ -77,6 +77,7 @@ interface BookingInfo {
   poli: string;
   sesi: string;
   nama: string;
+  status?: string;
   adminBatal?: boolean; // flag dari pengecekan server
 }
 
@@ -111,11 +112,21 @@ export default function ReservasiPage() {
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [showMultiRecovery, setShowMultiRecovery] = useState(false);
   const [ticketToDelete, setTicketToDelete] = useState<string | null>(null);
+  const [blockedDates, setBlockedDates] = useState<any[]>([]);
 
   const formTopRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    const fetchBlockedDates = async () => {
+      try {
+        const res = await fetch('/api/blocked-dates');
+        const json = await res.json();
+        if (res.ok) setBlockedDates(json.data || []);
+      } catch (e) {}
+    };
+    fetchBlockedDates();
+
     const calculateMinDate = () => {
       const now = new Date();
       const jakartaTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
@@ -155,30 +166,20 @@ export default function ReservasiPage() {
             const res = await fetch(`/api/cek-tiket?kodes=${kodes}`);
             const json = await res.json();
             if (json.data) {
-              const cancelledCodes = new Set<string>(
-                json.data.filter((d: any) => d.status === 'Batal').map((d: any) => d.kode_booking)
-              );
-              // AUTO-CLEAR: hapus tiket Selesai dan Batal dari localStorage
-              const finishedCodes = new Set<string>(
-                json.data.filter((d: any) => d.status === 'Selesai' || d.status === 'Batal').map((d: any) => d.kode_booking)
-              );
-              const stillActive = validByDate.filter(t => !finishedCodes.has(t.kode));
-              const adminCancelled = validByDate.filter(t => cancelledCodes.has(t.kode));
-              const finished = validByDate.filter(t => {
+              // Update status terbaru dari server
+              const updatedTickets = validByDate.map(t => {
                 const serverRecord = json.data.find((d: any) => d.kode_booking === t.kode);
-                return serverRecord?.status === 'Selesai';
+                return serverRecord ? { ...t, status: serverRecord.status } : t;
               });
 
-              if (adminCancelled.length > 0) setCancelledNotices(adminCancelled);
-              // Toast jika ada tiket selesai yang dihapus otomatis
-              if (finished.length > 0) {
-                setTimeout(() => showToast(
-                  "Sesi pengobatan Anda sebelumnya telah selesai. Anda kini dapat mendaftar kembali.",
-                  "success"
-                ), 600);
+              const adminCancelled = updatedTickets.filter(t => t.status === 'Batal');
+              if (adminCancelled.length > 0 && !localStorage.getItem("cipatik_notified_batal")) {
+                setCancelledNotices(adminCancelled);
+                localStorage.setItem("cipatik_notified_batal", "true");
               }
-              setActiveTickets(stillActive);
-              localStorage.setItem("cipatik_tickets", JSON.stringify(stillActive));
+              
+              setActiveTickets(updatedTickets);
+              localStorage.setItem("cipatik_tickets", JSON.stringify(updatedTickets));
               return;
             }
           } catch { /* server cek gagal, lanjut normal */ }
@@ -212,21 +213,52 @@ export default function ReservasiPage() {
     const jakartaNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
     const [y, m, d] = watchDate.split('-').map(Number);
     const selectedMidnight = new Date(y, m - 1, d);
-    const todayMidnight = new Date(jakartaNow.getFullYear(), jakartaNow.getMonth(), jakartaNow.getDate());
-    if (selectedMidnight.getTime() !== todayMidnight.getTime()) {
-      setDisabledSessions([]); setSesiMessage(""); return;
+    
+    // Validasi Hari Minggu
+    if (selectedMidnight.getDay() === 0) {
+      setTimeout(() => {
+        showToast("Klinik tutup di hari Minggu. Silakan pilih hari lain.", "info");
+        resetField("tanggalKunjungan");
+      }, 0);
+      return;
     }
-    const mins = jakartaNow.getHours() * 60 + jakartaNow.getMinutes();
-    const disabled: string[] = [];
-    if (mins >= 12 * 60) disabled.push("Pagi (08:00 - 12:00)");
-    if (mins >= 18 * 60) disabled.push("Sore (14:00 - 18:00)");
-    setDisabledSessions(disabled);
-    if (disabled.length === 2) setSesiMessage("⚠️ Semua sesi hari ini telah berakhir. Silakan pilih tanggal berikutnya.");
-    else if (disabled.length === 1) setSesiMessage("ℹ️ Sesi Pagi sudah berakhir. Hanya tersedia Sesi Sore.");
-    else setSesiMessage("");
-    // Auto-reset sesi jika yang dipilih sudah kadaluarsa
-    if (watchSesi && disabled.includes(watchSesi)) resetField("sesiKunjungan");
-  }, [watchDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Validasi Blocked Dates
+    const isBlocked = blockedDates.find(bd => bd.tanggal === watchDate);
+    if (isBlocked) {
+      setTimeout(() => {
+        showToast(`Libur: ${isBlocked.keterangan}. Silakan pilih tanggal lain.`, "info");
+        resetField("tanggalKunjungan");
+      }, 0);
+      return;
+    }
+
+    const todayMidnight = new Date(jakartaNow.getFullYear(), jakartaNow.getMonth(), jakartaNow.getDate());
+    
+    if (selectedMidnight.getTime() === todayMidnight.getTime()) {
+      const mins = jakartaNow.getHours() * 60 + jakartaNow.getMinutes();
+      
+      // Validasi Cutoff Hari Ini (>= 16:00)
+      if (mins >= 16 * 60) {
+        setTimeout(() => {
+          showToast("Pendaftaran hari ini sudah ditutup (batas 16:00). Silakan pilih hari esok.", "info");
+          resetField("tanggalKunjungan");
+        }, 0);
+        return;
+      }
+      
+      const disabled: string[] = [];
+      if (mins >= 12 * 60) disabled.push("Pagi (08:00 - 12:00)");
+      if (mins >= 18 * 60) disabled.push("Sore (14:00 - 18:00)");
+      setDisabledSessions(disabled);
+      if (disabled.length === 2) setSesiMessage("⚠️ Semua sesi hari ini telah berakhir. Silakan pilih tanggal berikutnya.");
+      else if (disabled.length === 1) setSesiMessage("ℹ️ Sesi Pagi sudah berakhir. Hanya tersedia Sesi Sore.");
+      else setSesiMessage("");
+      if (watchSesi && disabled.includes(watchSesi)) resetField("sesiKunjungan");
+    } else {
+      setDisabledSessions([]); setSesiMessage("");
+    }
+  }, [watchDate, blockedDates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const scrollToTop = () => {
     if (formTopRef.current) {
@@ -284,7 +316,8 @@ export default function ReservasiPage() {
         tanggal: data.tanggalKunjungan,
         poli: data.poliTujuan,
         sesi: data.sesiKunjungan,
-        nama: data.namaLengkap
+        nama: data.namaLengkap,
+        status: "Menunggu"
       };
 
       const alreadyExists = activeTickets.some((ticket) => ticket.kode === newTicket.kode);
@@ -478,7 +511,7 @@ export default function ReservasiPage() {
                   <p className="font-bold text-slate-900 text-base leading-tight">Pemberitahuan Reservasi</p>
                   <p className="text-amber-600 text-xs font-semibold mt-0.5">Dari Klinik Pratama Cipatik</p>
                 </div>
-                <button onClick={() => setCancelledNotices([])} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors -mr-1 shrink-0">
+                <button onClick={() => setCancelledNotices([])} aria-label="Tutup pemberitahuan" className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors -mr-1 shrink-0">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -587,6 +620,11 @@ export default function ReservasiPage() {
                                 <p className="flex justify-between items-center"><span className="text-slate-500">Nama:</span> <span className="font-bold text-slate-800 truncate max-w-[140px]">{ticket.nama}</span></p>
                                 <p className="flex justify-between items-center"><span className="text-slate-500">Tgl:</span> <span className="font-semibold text-slate-800">{new Date(ticket.tanggal).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</span></p>
                                 <p className="flex justify-between items-center"><span className="text-slate-500">Poli/Sesi:</span> <span className="font-semibold text-teal-700 bg-teal-50 px-2 py-0.5 rounded text-xs border border-teal-100">{ticket.poli} ({ticket.sesi.includes('Pagi') ? 'Pagi' : 'Sore'})</span></p>
+                                <p className="flex justify-between items-center pt-1"><span className="text-slate-500">Status:</span> 
+                                  <span className={`font-black text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-md border ${ticket.status === 'Selesai' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : ticket.status === 'Batal' ? 'bg-rose-50 text-rose-600 border-rose-200' : ticket.status === 'Hadir' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}>
+                                    {ticket.status || "Menunggu"}
+                                  </span>
+                                </p>
                               </div>
                               {/* 4. Simpan / Cetak PDF Button */}
                               <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end">

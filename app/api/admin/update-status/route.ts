@@ -33,7 +33,7 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({ data }, { status: 200 });
   } catch (error: any) {
-    console.error('[Admin API] Gagal update status:', error.message);
+    // [Admin API] Gagal update status
     return NextResponse.json({ error: 'Gagal mengubah status.' }, { status: 500 });
   }
 }

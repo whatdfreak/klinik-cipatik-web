@@ -10,7 +10,8 @@ const supabaseAdmin = createClient(
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const date = searchParams.get('date');
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
     const status = searchParams.get('status');
 
     let query = supabaseAdmin
@@ -18,9 +19,10 @@ export async function GET(request: Request) {
       .select('id, kode_booking, nama_pasien, no_hp, poli_tujuan, tanggal_kunjungan, status, created_at')
       .order('tanggal_kunjungan', { ascending: false })
       .order('created_at', { ascending: false })
-      .limit(500);
+      .limit(1000);
 
-    if (date) query = query.eq('tanggal_kunjungan', date);
+    if (startDate) query = query.gte('tanggal_kunjungan', startDate);
+    if (endDate) query = query.lte('tanggal_kunjungan', endDate);
     if (status && status !== 'Semua') query = query.eq('status', status);
 
     const { data, error } = await query;
@@ -28,7 +30,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ data }, { status: 200 });
   } catch (error: any) {
-    console.error('[Admin API] Gagal mengambil data:', error.message);
+    // [Admin API] Gagal mengambil data
     return NextResponse.json({ error: 'Gagal mengambil data antrean.' }, { status: 500 });
   }
 }

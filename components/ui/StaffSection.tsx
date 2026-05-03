@@ -17,7 +17,7 @@ async function getStaff() {
     .order("id", { ascending: true });
 
   if (error) {
-    console.error("[StaffSection] Supabase error:", error.message);
+    // [StaffSection] Supabase error
     return [];
   }
   return data ?? [];

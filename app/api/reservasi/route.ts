@@ -17,7 +17,7 @@ const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_REQUEST = 10;
 const MAX_BOOKING_PER_PHONE_PER_DAY = 3;
 const MAX_BOOKING_WINDOW_DAYS = 30;
-const MAX_BOOKING_PER_SESSION = 120;
+const MAX_BOOKING_PER_SESSION = 30;
 const IDEMPOTENCY_TTL_MS = 2 * 60 * 1000;
 // Sesuaikan dengan SOP klinik:
 // - true: NIK boleh daftar >1x per hari jika beda sesi
@@ -128,7 +128,7 @@ const sendWhatsAppNotification = async (no_hp: string, nama: string, kode: strin
   try {
     const token = process.env.FONNTE_TOKEN;
     if (!token) {
-      console.warn("FONNTE_TOKEN is missing. WhatsApp notification skipped.");
+      // FONNTE_TOKEN is missing. WhatsApp notification skipped.
       return;
     }
 
@@ -152,11 +152,11 @@ const sendWhatsAppNotification = async (no_hp: string, nama: string, kode: strin
 
     const result = await res.json();
     if (!result.status) {
-      console.error("❌ Fonnte API Error:", result.reason);
+      // Fonnte API Error
     } else {
     }
   } catch (error) {
-    console.error("❌ Failed to send WhatsApp notification:", error);
+    // Failed to send WhatsApp notification
   }
 };
 
@@ -238,6 +238,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Klinik tutup di hari Minggu. Silakan pilih hari lain.' }, { status: 400, headers: jsonHeaders });
     }
 
+    const { data: blocked } = await supabaseAdmin.from('blocked_dates').select('tanggal, keterangan').eq('tanggal', tanggal_kunjungan).maybeSingle();
+    if (blocked) {
+      return NextResponse.json({ error: `Klinik libur pada tanggal ini: ${blocked.keterangan}` }, { status: 400, headers: jsonHeaders });
+    }
+
+    if (targetDate.getTime() === today.getTime()) {
+      const now = new Date();
+      const jakartaNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
+      const mins = jakartaNow.getHours() * 60 + jakartaNow.getMinutes();
+      if (mins >= 16 * 60) {
+        return NextResponse.json({ error: 'Pendaftaran hari ini sudah ditutup (batas 16:00).' }, { status: 400, headers: jsonHeaders });
+      }
+    }
+
     const poliGabungan = `${poli_tujuan} - ${sesi_kunjungan}`;
 
     const { data: existingRecords, error: checkError } = await supabaseAdmin
@@ -306,12 +320,12 @@ export async function POST(request: Request) {
       .select(); 
 
     if (error) {
-      console.error("❌ DB Insert Error [INTERNAL]:", error);
+      // DB Insert Error
       return NextResponse.json({ error: 'Gagal menyimpan data ke sistem antrean klinik.' }, { status: 500, headers: jsonHeaders });
     }
 
     sendWhatsAppNotification(no_hp, nama_pasien, kode_booking, tanggal_kunjungan, poli_tujuan, sesi_kunjungan).catch(err => {
-      console.error("Unhandled error in WhatsApp notification background task:", err);
+      // Unhandled error in WhatsApp notification background task
     });
 
     const successPayload = { success: true, kode_booking, data: data[0] };
@@ -327,7 +341,7 @@ export async function POST(request: Request) {
     return NextResponse.json(successPayload, { status: 201, headers: jsonHeaders });
 
   } catch (error: any) {
-    console.error("❌ Catch API Error [INTERNAL]:", error);
+    // Catch API Error
     return NextResponse.json({ error: 'Terjadi kesalahan internal server saat memproses reservasi.' }, { status: 500, headers: jsonHeaders });
   }
 }

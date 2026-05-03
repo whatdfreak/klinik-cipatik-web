@@ -6,8 +6,16 @@ import ConditionalLayout from "@/components/layout/ConditionalLayout";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Klinik Pratama Cipatik | Pelayanan Medis Terpadu",
-  description: "Fasilitas Kesehatan Tingkat Pertama (FKTP) melayani pasien Umum, BPJS, dan Asuransi Swasta di Cipatik.",
+  title: "Klinik Pratama Cipatik - Reservasi Online & Profil",
+  description: "Fasilitas Kesehatan Tingkat Pertama (FKTP) melayani pasien Umum, BPJS, dan Asuransi Swasta di Cipatik. Daftar antrean online dengan cepat dan mudah.",
+  openGraph: {
+    title: "Klinik Pratama Cipatik - Reservasi Online & Profil",
+    description: "Fasilitas Kesehatan Tingkat Pertama (FKTP) melayani pasien Umum, BPJS, dan Asuransi Swasta di Cipatik. Daftar antrean online dengan cepat dan mudah.",
+    url: "https://klinik-cipatik.com",
+    siteName: "Klinik Pratama Cipatik",
+    locale: "id_ID",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
