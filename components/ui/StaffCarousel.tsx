@@ -80,7 +80,7 @@ export function StaffCarousel({ staff }: { staff: Staff[] }) {
             <p className="text-teal-400 font-bold text-sm mb-1 uppercase tracking-wider">{medis.kategori}</p>
             <h3 className="text-2xl font-bold text-white mb-1">{medis.nama}</h3>
             <p className="text-teal-100 font-medium text-xs mb-3 uppercase tracking-wider">
-              {medis.jabatan} • {medis.status_karyawan}
+              {medis.jabatan}
             </p>
             <div className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-500 delay-100">
               <p className="text-slate-200 text-sm leading-relaxed mb-4">{medis.deskripsi}</p>
