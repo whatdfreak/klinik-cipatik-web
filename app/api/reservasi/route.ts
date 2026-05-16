@@ -15,14 +15,9 @@ type IdempotencyEntry = { payloadHash: string; response: unknown; status: number
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_REQUEST = 10;
-const MAX_BOOKING_PER_PHONE_PER_DAY = 3;
 const MAX_BOOKING_WINDOW_DAYS = 30;
 const MAX_BOOKING_PER_SESSION = 30;
 const IDEMPOTENCY_TTL_MS = 2 * 60 * 1000;
-// Sesuaikan dengan SOP klinik:
-// - true: NIK boleh daftar >1x per hari jika beda sesi
-// - false: NIK hanya boleh 1x per hari
-const ALLOW_MULTI_BOOKING_SAME_NIK_PER_DAY = true;
 
 const getRateLimitStore = (): Map<string, RateLimitEntry> => {
   const g = globalThis as typeof globalThis & {
@@ -183,7 +178,7 @@ export async function POST(request: Request) {
     } else {
       currentRate.count += 1;
       rateLimitStore.set(ip, currentRate);
-    }
+    } 
 
     let body: unknown;
     try {
@@ -192,14 +187,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Payload JSON tidak valid.' }, { status: 400, headers: jsonHeaders });
     }
 
-    // Honeypot anti-bot sederhana: field ini tidak pernah ada di UI normal
+    // Honeypot anti-bot sederhana: field ini tidak ada di UI normal
     if (typeof body === 'object' && body !== null && 'website' in body && (body as Record<string, unknown>).website) {
       return NextResponse.json({ error: 'Permintaan ditolak oleh sistem keamanan.' }, { status: 400, headers: jsonHeaders });
     }
 
     const parseResult = serverSchema.safeParse(body);
     if (!parseResult.success) {
-      return NextResponse.json({ error: 'Data tidak valid atau format salah. Ditolak oleh server.' }, { status: 400, headers: jsonHeaders });
+      const firstError = parseResult.error.issues[0];
+      const errorMessage = firstError?.message || 'Format data tidak sesuai.';
+      
+      // Standar Industri REST API:
+      // - "error": pesan ringkas yang bisa langsung ditampilkan di UI (Toast/Alert Frontend)
+      // - "details": rincian teknis terstruktur per field (digunakan untuk debugging/logging)
+      return NextResponse.json({ 
+        error: `Data tidak valid: ${errorMessage}`
+      }, { status: 400, headers: jsonHeaders });
     }
 
     const { nik, nama_pasien, no_hp, poli_tujuan, sesi_kunjungan, tanggal_kunjungan } = parseResult.data;
@@ -256,37 +259,28 @@ export async function POST(request: Request) {
 
     const { data: existingRecords, error: checkError } = await supabaseAdmin
       .from('appointments')
-      .select('id, nik, no_hp, poli_tujuan')
+      .select('id, nik, no_hp')
       .eq('tanggal_kunjungan', tanggal_kunjungan)
-      .or(`nik.eq.${nik},no_hp.eq.${no_hp}`)
-      .neq('status', 'Batal'); // Tiket yang dibatalkan tidak dihitung
+      .in('status', ['Menunggu', 'Hadir'])
+      .or(`nik.eq.${nik},no_hp.eq.${no_hp}`);
 
     if (checkError) throw checkError;
 
-    if (existingRecords) {
+    if (existingRecords && existingRecords.length > 0) {
       const sameNik = existingRecords.filter(r => r.nik === nik);
-      if (!ALLOW_MULTI_BOOKING_SAME_NIK_PER_DAY && sameNik.length > 0) {
-        return NextResponse.json({ error: 'NIK ini sudah terdaftar untuk tanggal tersebut.' }, { status: 409, headers: jsonHeaders });
-      }
-      if (ALLOW_MULTI_BOOKING_SAME_NIK_PER_DAY) {
-        // Tetap cegah duplikat sesi/poli yang sama
-        const sameNikSameSession = sameNik.some((r) => r.poli_tujuan === poliGabungan);
-        if (sameNikSameSession) {
-          return NextResponse.json(
-            { error: 'NIK ini sudah memiliki pendaftaran di sesi yang sama pada tanggal tersebut.' },
-            { status: 409, headers: jsonHeaders }
-          );
-        }
+      if (sameNik.length > 0) {
+        return NextResponse.json(
+          { error: 'NIK Anda sudah memiliki pendaftaran aktif pada tanggal tersebut. Silakan selesaikan atau batalkan tiket sebelumnya.' },
+          { status: 409, headers: jsonHeaders }
+        );
       }
       
       const samePhone = existingRecords.filter(r => r.no_hp === no_hp);
-      if (samePhone.length >= MAX_BOOKING_PER_PHONE_PER_DAY) {
-        return NextResponse.json({ error: 'Nomor HP ini telah mencapai batas maksimal 3 pendaftaran per hari.' }, { status: 429, headers: jsonHeaders });
-      }
-
-      const samePhoneSameSession = samePhone.some((r) => r.poli_tujuan === poliGabungan);
-      if (samePhoneSameSession) {
-        return NextResponse.json({ error: 'Sesi untuk nomor HP ini sudah terdaftar di tanggal yang sama.' }, { status: 409, headers: jsonHeaders });
+      if (samePhone.length >= 4) {
+        return NextResponse.json(
+          { error: 'Nomor WhatsApp ini telah mencapai batas maksimal pendaftaran keluarga (4 orang) untuk hari ini.' },
+          { status: 409, headers: jsonHeaders }
+        );
       }
     }
 
@@ -328,7 +322,14 @@ export async function POST(request: Request) {
       // Unhandled error in WhatsApp notification background task
     });
 
-    const successPayload = { success: true, kode_booking, data: data[0] };
+    // Standar Industri JSend Format untuk Response Sukses
+    const successPayload = { 
+      status: 'success', 
+      message: 'Pendaftaran reservasi berhasil dilakukan.',
+      kode_booking: kode_booking, // Dipertahankan di root untuk kompatibilitas frontend lama
+      data: data[0] 
+    };
+
     if (idempotencyKey) {
       const idempotencyStore = getIdempotencyStore();
       idempotencyStore.set(idempotencyKey, {
@@ -344,4 +345,4 @@ export async function POST(request: Request) {
     // Catch API Error
     return NextResponse.json({ error: 'Terjadi kesalahan internal server saat memproses reservasi.' }, { status: 500, headers: jsonHeaders });
   }
-}
+}

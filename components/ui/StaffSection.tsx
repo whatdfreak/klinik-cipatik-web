@@ -33,7 +33,6 @@ async function StaffData() {
 export default function StaffSection() {
   return (
     <Suspense fallback={<StaffCarouselSkeleton />}>
-      {/* @ts-expect-error Server Component */}
       <StaffData />
     </Suspense>
   );

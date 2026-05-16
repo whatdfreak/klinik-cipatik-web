@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Laporan Tugas Kampus
+docs/
+Laporan_UTS*.md

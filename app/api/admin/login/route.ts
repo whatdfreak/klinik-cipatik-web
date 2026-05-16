@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { createSessionToken } from '@/lib/session';
 
 export async function POST(request: Request) {
   try {
@@ -14,9 +15,8 @@ export async function POST(request: Request) {
     }
 
     if (username === validUsername && password === validPassword) {
-      // Create a secure cookie (for 1 admin, a static random string or simple token is enough)
-      // Here we just use a simple static token to represent the session.
-      const sessionToken = "cipatik_admin_" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+      // Create a signed session token (HMAC-SHA256)
+      const sessionToken = await createSessionToken();
       
       const cookieStore = await cookies();
       cookieStore.set('admin_session', sessionToken, {

@@ -510,7 +510,7 @@ export default function AdminPage() {
                       
                       const displayStatus = isExpired ? "Terlewat" : apt.status;
                       const st = isExpired 
-                        ? { badge: "bg-rose-50 text-rose-700 border-rose-200", dot: "bg-rose-500" } 
+                        ? { badge: "bg-rose-50 text-rose-700 border-rose-200", dot: "bg-rose-500", text: "text-rose-700" } 
                         : STATUS_STYLE[apt.status] ?? STATUS_STYLE.Menunggu;
                       
                       const busy = updatingId===apt.id;
