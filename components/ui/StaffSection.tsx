@@ -1,17 +1,11 @@
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 import { StaffCarousel, StaffCarouselSkeleton } from "@/components/ui/StaffCarousel";
 import { Suspense } from "react";
-
-// Supabase server-side client (tidak butuh auth, hanya baca publik)
-const supabaseServer = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 // Fetch data di Server Component — no useEffect, no client-side delay
 // Next.js 15 cache: revalidate setiap 60 menit
 async function getStaff() {
-  const { data, error } = await supabaseServer
+  const { data, error } = await supabase
     .from("staff")
     .select("id, nama, kategori, jabatan, status_karyawan, deskripsi, foto_url, lisensi")
     .order("id", { ascending: true });
