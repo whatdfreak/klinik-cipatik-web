@@ -21,37 +21,37 @@ export default function AdminFilters(props: AdminFiltersProps) {
     onStartDateChange, onEndDateChange, onStatusFilterChange, onSearchChange,
     onOpenSettings, onExportCSV } = props;
   return (
-    <div className="bg-white rounded-[1.5rem] p-3.5 border border-slate-100 shadow-sm flex flex-col md:flex-row items-center gap-4">
-      <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl w-full md:w-auto hover:border-teal-300 transition-colors">
-        <CalendarDays className="w-4 h-4 text-slate-400"/>
-        <input type="date" value={startDate} onChange={e=>onStartDateChange(e.target.value)} className="bg-transparent text-[13px] font-bold text-slate-700 outline-none w-[110px] cursor-pointer"/>
+    <div className="bg-white rounded-2xl sm:rounded-[1.5rem] p-3 sm:p-3.5 border border-slate-100 shadow-sm flex flex-col md:flex-row items-center gap-3 sm:gap-4">
+      <div className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl w-full md:w-auto hover:border-teal-300 transition-colors">
+        <CalendarDays className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 shrink-0"/>
+        <input type="date" value={startDate} onChange={e=>onStartDateChange(e.target.value)} className="bg-transparent text-[12px] sm:text-[13px] font-bold text-slate-700 outline-none w-[100px] sm:w-[110px] cursor-pointer"/>
         <span className="text-slate-300 font-bold">-</span>
-        <input type="date" value={endDate} onChange={e=>onEndDateChange(e.target.value)} className="bg-transparent text-[13px] font-bold text-slate-700 outline-none w-[110px] cursor-pointer"/>
+        <input type="date" value={endDate} onChange={e=>onEndDateChange(e.target.value)} className="bg-transparent text-[12px] sm:text-[13px] font-bold text-slate-700 outline-none w-[100px] sm:w-[110px] cursor-pointer"/>
       </div>
       <div className="relative w-full md:w-auto">
         <select value={statusFilter} onChange={e=>onStatusFilterChange(e.target.value)}
-          className="w-full md:w-36 pl-4 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-[13px] font-bold text-slate-700 outline-none appearance-none cursor-pointer hover:border-teal-300 transition-colors">
+          className="w-full md:w-36 pl-3 sm:pl-4 pr-9 sm:pr-10 py-2 sm:py-2.5 bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-[12px] sm:text-[13px] font-bold text-slate-700 outline-none appearance-none cursor-pointer hover:border-teal-300 transition-colors">
            <option value="Semua">Semua Status</option>
            <option value="Menunggu">Menunggu</option>
            <option value="Hadir">Hadir</option>
            <option value="Selesai">Selesai</option>
            <option value="Batal">Batal</option>
         </select>
-        <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-[11px] pointer-events-none"/>
+        <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 sm:right-3.5 top-[9px] sm:top-[11px] pointer-events-none"/>
       </div>
       <div className="relative flex-1 w-full">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-[11px] pointer-events-none"/>
+        <Search className="w-4 h-4 text-slate-400 absolute left-3 sm:left-3.5 top-[9px] sm:top-[11px] pointer-events-none"/>
         <input type="text" placeholder="Cari nama, kode, atau HP..." value={searchQuery} onChange={e=>onSearchChange(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-[13px] font-bold text-slate-700 outline-none hover:border-teal-300 transition-colors placeholder:font-medium placeholder:text-slate-400"/>
+          className="w-full pl-9 sm:pl-10 pr-3 sm:pr-4 py-2 sm:py-2.5 bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-[12px] sm:text-[13px] font-bold text-slate-700 outline-none hover:border-teal-300 transition-colors placeholder:font-medium placeholder:text-slate-400"/>
       </div>
-      <div className="flex items-center justify-between md:justify-end gap-3 w-full md:w-auto">
-        <button onClick={onOpenSettings} className="flex items-center justify-center p-2.5 bg-white border border-slate-200 shadow-sm rounded-2xl text-slate-500 hover:text-slate-900 hover:bg-slate-50 active:scale-95 transition-all" title="Libur/Cuti" aria-label="Pengaturan Libur Cuti">
-          <Settings className="w-5 h-5"/>
+      <div className="flex items-center justify-between md:justify-end gap-2 sm:gap-3 w-full md:w-auto">
+        <button onClick={onOpenSettings} className="flex items-center justify-center p-2 sm:p-2.5 bg-white border border-slate-200 shadow-sm rounded-xl sm:rounded-2xl text-slate-500 hover:text-slate-900 hover:bg-slate-50 active:scale-95 transition-all" title="Libur/Cuti" aria-label="Pengaturan Libur Cuti">
+          <Settings className="w-4 h-4 sm:w-5 sm:h-5"/>
         </button>
-        <button onClick={onExportCSV} className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white border border-slate-200 shadow-sm rounded-2xl text-[13px] font-bold text-slate-700 hover:bg-slate-50 active:scale-95 transition-all flex-1 md:flex-none">
-           <Download className="w-4 h-4"/> Export CSV
+        <button onClick={onExportCSV} className="flex items-center justify-center gap-1.5 sm:gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-white border border-slate-200 shadow-sm rounded-xl sm:rounded-2xl text-[12px] sm:text-[13px] font-bold text-slate-700 hover:bg-slate-50 active:scale-95 transition-all flex-1 md:flex-none">
+           <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4"/> <span className="hidden sm:inline">Export</span> CSV
         </button>
-        <span className="text-[12px] font-bold text-slate-400 whitespace-nowrap hidden lg:block mr-2">{filteredCount} data</span>
+        <span className="text-[11px] sm:text-[12px] font-bold text-slate-400 whitespace-nowrap hidden lg:block mr-2">{filteredCount} data</span>
       </div>
     </div>
   );
