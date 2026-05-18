@@ -19,7 +19,7 @@ const POLL_INTERVAL_MS = 30_000; // 30 detik
 // ── STAT CARD (small, kept inline) ─────────────────────────────────────────
 function StatCard({label,value,icon:Icon,color}:{label:string;value:number;icon:React.ElementType;color:string}) {
   return (
-    <div className="bg-white rounded-[1.25rem] p-4 sm:p-5 border border-slate-100 shadow-sm flex items-center gap-3 sm:gap-4">
+    <div className="bg-white rounded-[1.25rem] p-4 sm:p-5 border border-slate-100 shadow-md shadow-slate-100/80 flex items-center gap-3 sm:gap-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-default">
       <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center shrink-0 ${color}`}>
         <Icon className="w-4 h-4 sm:w-5 sm:h-5"/>
       </div>
@@ -51,7 +51,7 @@ function LastUpdated({ lastRefresh, isSyncing }: { lastRefresh: Date | null; isS
   if (!lastRefresh) return null;
 
   return (
-    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 select-none">
+    <div role="status" aria-live="polite" className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 select-none">
       <span className="relative flex h-2 w-2">
         {isSyncing ? (
           <Loader2 className="w-2 h-2 animate-spin text-teal-400" />

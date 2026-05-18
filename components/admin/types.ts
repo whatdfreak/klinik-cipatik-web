@@ -24,7 +24,7 @@ export const STATUS_STYLE: Record<AppointmentStatus, { badge: string; dot: strin
   Menunggu: { badge: "bg-amber-50 border-amber-200", dot: "bg-amber-500", text: "text-amber-700" },
   Hadir:    { badge: "bg-blue-50 border-blue-200",   dot: "bg-blue-500",  text: "text-blue-700" },
   Selesai:  { badge: "bg-emerald-50 border-emerald-200", dot: "bg-emerald-500", text: "text-emerald-700" },
-  Batal:    { badge: "bg-slate-50 border-slate-200", dot: "bg-slate-400", text: "text-slate-600" },
+  Batal:    { badge: "bg-gray-100 border-gray-300", dot: "bg-gray-500", text: "text-gray-700" },
 };
 
 export const todayJakarta = () => {

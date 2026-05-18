@@ -21,7 +21,7 @@ export default function AdminFilters(props: AdminFiltersProps) {
     onStartDateChange, onEndDateChange, onStatusFilterChange, onSearchChange,
     onOpenSettings, onExportCSV } = props;
   return (
-    <div className="bg-white rounded-2xl sm:rounded-[1.5rem] p-3 sm:p-3.5 border border-slate-100 shadow-sm flex flex-col md:flex-row items-center gap-3 sm:gap-4">
+    <div className="bg-white rounded-2xl sm:rounded-[1.5rem] p-3 sm:p-3.5 border border-slate-100 shadow-md shadow-slate-100/50 flex flex-col md:flex-row items-center gap-3 sm:gap-4">
       <div className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl w-full md:w-auto hover:border-teal-300 transition-colors">
         <CalendarDays className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 shrink-0"/>
         <input type="date" value={startDate} onChange={e=>onStartDateChange(e.target.value)} className="bg-transparent text-[12px] sm:text-[13px] font-bold text-slate-700 outline-none w-[100px] sm:w-[110px] cursor-pointer"/>

@@ -52,10 +52,10 @@ export default function AdminTable({ filtered, loading, fetchError, updatingId, 
             </div>
           ) : (
             <table className="w-full text-left min-w-[900px]">
-              <thead>
-                <tr className="border-b border-slate-100 bg-white">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-slate-100 bg-white/95 backdrop-blur-sm shadow-[0_1px_3px_0_rgba(0,0,0,0.04)]">
                   {["Kode Booking", "Tanggal Hadir", "Nama & No. HP", "Poli & Sesi", "Status", "Waktu Daftar", "Aksi"].map(h => (
-                    <th key={h} className="px-4 sm:px-6 py-3 sm:py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    <th key={h} scope="col" className="px-4 sm:px-6 py-3 sm:py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -100,33 +100,33 @@ export default function AdminTable({ filtered, loading, fetchError, updatingId, 
                           <p className="text-[11px] sm:text-[12px] font-bold text-slate-500">{fmtTime(apt.created_at)}</p>
                         </td>
                         <td className="px-4 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
-                          {busy ? <div className="w-8 h-8 flex items-center justify-center"><Loader2 className="w-4 h-4 animate-spin text-slate-400"/></div> : (
-                            <div className="flex items-center gap-1.5 sm:gap-2">
+                          {busy ? <div className="w-9 h-9 flex items-center justify-center"><Loader2 className="w-4 h-4 animate-spin text-slate-400"/></div> : (
+                            <div className="flex items-center gap-2 sm:gap-2.5">
                               {apt.status==="Menunggu" && (
-                                <button onClick={()=>onUpdateStatus(apt.id,"Hadir",apt.kode_booking)} title="Tandai Hadir"
-                                  className="w-8 h-8 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-[10px] flex items-center justify-center transition-colors active:scale-95">
+                                <button onClick={()=>onUpdateStatus(apt.id,"Hadir",apt.kode_booking)} title="Tandai Hadir" aria-label={`Tandai ${apt.nama_pasien} hadir`}
+                                  className="w-9 h-9 min-w-[36px] min-h-[36px] bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-[10px] flex items-center justify-center transition-colors active:scale-95 touch-manipulation">
                                   <UserCheck className="w-4 h-4"/>
                                 </button>
                               )}
                               {(apt.status==="Menunggu"||apt.status==="Hadir") && (
-                                <button onClick={()=>onUpdateStatus(apt.id,"Selesai",apt.kode_booking)} title="Tandai Selesai"
-                                  className="w-8 h-8 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-[10px] flex items-center justify-center transition-colors active:scale-95">
+                                <button onClick={()=>onUpdateStatus(apt.id,"Selesai",apt.kode_booking)} title="Tandai Selesai" aria-label={`Tandai ${apt.nama_pasien} selesai`}
+                                  className="w-9 h-9 min-w-[36px] min-h-[36px] bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-[10px] flex items-center justify-center transition-colors active:scale-95 touch-manipulation">
                                   <CheckCircle2 className="w-4 h-4"/>
                                 </button>
                               )}
                               {apt.status!=="Batal"&&apt.status!=="Selesai" && (
-                                <button title="Batalkan Reservasi" onClick={()=>onAskConfirm(
+                                <button title="Batalkan Reservasi" aria-label={`Batalkan reservasi ${apt.nama_pasien}`} onClick={()=>onAskConfirm(
                                   "Batalkan Reservasi",
                                   `Batalkan kode ${apt.kode_booking} atas nama ${apt.nama_pasien}?`,
                                   "Ya, Batalkan","bg-rose-600 hover:bg-rose-700",
                                   ()=>onUpdateStatus(apt.id,"Batal",apt.kode_booking)
-                                )} className="w-8 h-8 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-[10px] flex items-center justify-center transition-colors active:scale-95">
+                                )} className="w-9 h-9 min-w-[36px] min-h-[36px] bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-[10px] flex items-center justify-center transition-colors active:scale-95 touch-manipulation">
                                   <XCircle className="w-4 h-4"/>
                                 </button>
                               )}
                               {(apt.status==="Selesai"||apt.status==="Batal") && (
-                                <button onClick={()=>onUpdateStatus(apt.id,"Menunggu",apt.kode_booking)} title="Kembalikan ke Antrian"
-                                  className="w-8 h-8 bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-200 rounded-[10px] flex items-center justify-center transition-colors active:scale-95">
+                                <button onClick={()=>onUpdateStatus(apt.id,"Menunggu",apt.kode_booking)} title="Kembalikan ke Antrian" aria-label={`Kembalikan ${apt.nama_pasien} ke antrian`}
+                                  className="w-9 h-9 min-w-[36px] min-h-[36px] bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-200 rounded-[10px] flex items-center justify-center transition-colors active:scale-95 touch-manipulation">
                                   <RefreshCcw className="w-3.5 h-3.5"/>
                                 </button>
                               )}
